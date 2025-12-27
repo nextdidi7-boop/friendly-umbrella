@@ -1,0 +1,229 @@
+--[[ 
+    WindUI | SILENT AIM (AUTO HYBRID HEAD LOCK)
+    ONE FILE FINAL | HEAD ONLY
+    SUPPORT: Raycast + Ray + Mouse
+    NO CAMERA LOCK | SAFE ADD-ON
+]]
+
+--------------------------------------------------
+-- Load WindUI
+--------------------------------------------------
+local WindUI
+do
+    local ok, result = pcall(function()
+        return require("./src/Init")
+    end)
+    WindUI = ok and result or loadstring(game:HttpGet(
+        "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"
+    ))()
+end
+
+--------------------------------------------------
+-- Services
+--------------------------------------------------
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Camera = workspace.CurrentCamera
+
+local LocalPlayer = Players.LocalPlayer
+
+--------------------------------------------------
+-- States
+--------------------------------------------------
+local SilentAim = false
+local TeamCheck = true
+local MaxDistance = 600
+local FOV = 120
+
+local CurrentTarget = nil
+
+--------------------------------------------------
+-- Utility
+--------------------------------------------------
+local function isAlive(char)
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    return hum and hum.Health > 0
+end
+
+local function isTeammate(p)
+    if not TeamCheck then return false end
+    if not LocalPlayer.Team or not p.Team then return false end
+    return p.Team == LocalPlayer.Team
+end
+
+--------------------------------------------------
+-- Visibility Check
+--------------------------------------------------
+local RayParams = RaycastParams.new()
+RayParams.FilterType = Enum.RaycastFilterType.Blacklist
+RayParams.IgnoreWater = true
+
+local function isVisible(part, char)
+    RayParams.FilterDescendantsInstances = {LocalPlayer.Character, char}
+    local origin = Camera.CFrame.Position
+    local dir = part.Position - origin
+    return not workspace:Raycast(origin, dir, RayParams)
+end
+
+--------------------------------------------------
+-- Drawing (FOV + Line)
+--------------------------------------------------
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 2
+FOVCircle.Filled = false
+FOVCircle.Color = Color3.fromRGB(255,255,0)
+
+local AimLine = Drawing.new("Line")
+AimLine.Thickness = 2
+AimLine.Color = Color3.fromRGB(255,0,0)
+
+--------------------------------------------------
+-- Target Selector (HEAD ONLY)
+--------------------------------------------------
+local function getTarget()
+    local center = Vector2.new(
+        Camera.ViewportSize.X / 2,
+        Camera.ViewportSize.Y / 2
+    )
+
+    local closest = math.huge
+    local target = nil
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer
+        and p.Character
+        and isAlive(p.Character)
+        and not isTeammate(p) then
+
+            local head = p.Character:FindFirstChild("Head")
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if head and hrp then
+                if (Camera.CFrame.Position - hrp.Position).Magnitude <= MaxDistance
+                and isVisible(head, p.Character) then
+
+                    local pos, onScreen = Camera:WorldToViewportPoint(head.Position)
+                    if onScreen then
+                        local dist = (Vector2.new(pos.X,pos.Y) - center).Magnitude
+                        if dist < FOV and dist < closest then
+                            closest = dist
+                            target = head
+                        end
+                    end
+                end
+            end
+        end
+    end
+
+    return target
+end
+
+--------------------------------------------------
+-- Render Loop
+--------------------------------------------------
+RunService.RenderStepped:Connect(function()
+    local center = Vector2.new(
+        Camera.ViewportSize.X / 2,
+        Camera.ViewportSize.Y / 2
+    )
+
+    FOVCircle.Position = center
+    FOVCircle.Radius = FOV
+    FOVCircle.Visible = SilentAim
+
+    AimLine.Visible = false
+    CurrentTarget = nil
+
+    if SilentAim then
+        CurrentTarget = getTarget()
+    end
+
+    if CurrentTarget then
+        local p = Camera:WorldToViewportPoint(CurrentTarget.Position)
+        AimLine.From = center
+        AimLine.To = Vector2.new(p.X, p.Y)
+        AimLine.Visible = true
+    end
+end)
+
+--------------------------------------------------
+-- 🎯 AUTO HYBRID HEAD LOCK
+-- Raycast + Ray + Mouse
+--------------------------------------------------
+local mt = getrawmetatable(game)
+setreadonly(mt,false)
+
+local oldNamecall = mt.__namecall
+local oldIndex = mt.__index
+
+mt.__namecall = newcclosure(function(self, ...)
+    local args = {...}
+    local method = getnamecallmethod()
+
+    if SilentAim and CurrentTarget then
+        local headPos = CurrentTarget.Position
+
+        -- New FPS / Raycast
+        if method == "Raycast" then
+            local origin = args[1]
+            args[2] = (headPos - origin)
+            return oldNamecall(self, unpack(args))
+        end
+
+        -- Old FPS
+        if method == "FindPartOnRay"
+        or method == "FindPartOnRayWithIgnoreList"
+        or method == "FindPartOnRayWithWhitelist" then
+            local ray = args[1]
+            args[1] = Ray.new(ray.Origin, (headPos - ray.Origin))
+            return oldNamecall(self, unpack(args))
+        end
+    end
+
+    return oldNamecall(self, ...)
+end)
+
+-- Mouse-based games
+mt.__index = newcclosure(function(self, key)
+    if SilentAim and CurrentTarget and tostring(self) == "Mouse" then
+        if key == "Hit" then
+            return CFrame.new(CurrentTarget.Position)
+        elseif key == "Target" then
+            return CurrentTarget
+        end
+    end
+    return oldIndex(self, key)
+end)
+
+--------------------------------------------------
+-- UI
+--------------------------------------------------
+local Window = WindUI:CreateWindow({
+    Title="block spin🔥🔫",
+    Folder="WindHub",
+    OpenButton={Title="block spin🔥🔫",Enabled=true}
+})
+
+local Main = Window:Tab({Title="เมนู"})
+
+Main:Toggle({
+    Title="Fov",
+    Callback=function(v) SilentAim = v end
+})
+
+Main:Toggle({
+    Title="ทีม",
+    Default=true,
+    Callback=function(v) TeamCheck = v end
+})
+
+Main:Slider({
+    Title="ปรับFOV",
+    Value={Min=40,Max=400,Default=FOV},
+    Callback=function(v) FOV = v end
+})
+
+Main:Slider({
+    Title="ระยะ",
+    Value={Min=100,Max=1200,Default=MaxDistance},
+    Callback=function(v) MaxDistance = v end
+})
