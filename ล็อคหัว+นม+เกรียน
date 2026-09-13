@@ -1,76 +1,54 @@
 --[[ 
-    WindUI | ULTIMATE COMBAT, ESP, MOVEMENT & JIGGLE PHYSICS (FULL THAI VERSION)
-    ส่วนที่ 1/2: ระบบตรรกะ, ฟิสิกส์หน้าอกแบบนุ่มนวล และระบบ ESP
+    WindUI | ULTIMATE DELTA MOBILE FIXED VERSION (THAI)
+    ส่วนที่ 1/2: Core Engine, Smooth Physics & Screen ESP
 ]]
 
---------------------------------------------------
--- ฟังก์ชันช่วยคำนวณเบื้องต้น
---------------------------------------------------
-local function isCharValid(char)
-    return char and char.Parent and char:IsDescendantOf(workspace)
-end
-
---------------------------------------------------
--- ดึงข้อมูล WindUI
---------------------------------------------------
-local WindUI
-do
-    local ok, result = pcall(function()
-        return require("./src/Init")
-    end)
-    WindUI = ok and result or loadstring(game:HttpGet(
-        "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"
-    ))()
-end
-
---------------------------------------------------
--- บริการของ Roblox
---------------------------------------------------
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local UserInputService = game:GetService("UserInputService")
 local VirtualUser = game:GetService("VirtualUser")
-local Camera = Workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
 
 --------------------------------------------------
--- ระบบจัดการค่าการตั้งค่า (Settings)
+-- โหลด WindUI
+--------------------------------------------------
+local WindUI
+do
+    local ok, res = pcall(function() return require("./src/Init") end)
+    WindUI = ok and res or loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
+end
+
+--------------------------------------------------
+-- ค่าการตั้งค่า (Settings)
 --------------------------------------------------
 local Settings = {
-    -- การต่อสู้ (Combat)
+    -- Combat
     SilentAim = false,
     CameraLock = false,
-    TargetPart = "Head",
-    WallCheck = true,
-    TeamCheck = true,
-    MaxDistance = 1000,
-    FOV = 150,
-    Prediction = false,
-    PredictionVelocity = 0.165,
     SmoothLock = false,
-    Smoothness = 0.2,
-    StickyTarget = false,
+    Smoothness = 0.15,
+    TargetPart = "Head",
+    WallCheck = false,
+    TeamCheck = false,
+    MaxDistance = 2000,
+    FOV = 200,
 
-    -- ระบบมองผ่านกำแพง (ESP Visuals)
+    -- Visuals ESP
     ESP_Name = false,
     ESP_Box = false,
     ESP_Health = false,
     ESP_Tracers = false,
-    ESP_Highlight = false,
-    TracersColor = Color3.fromRGB(255, 255, 255),
-
-    -- การปรับแต่งวงเล็ง
     ShowFOV = true,
-    FOVColor = Color3.fromRGB(0, 255, 150),
 
-    -- ฟีเจอร์หน้าอกเด้งละมุน (Realistic Boob Physics)
+    -- Physics
     BoobFeature = false,
-    BoobStiffness = 10,  -- ความยืดหยุ่น ยิ่งน้อยยิ่งนุ่ม
-    BoobDamping = 0.25,  -- การซับแรงสั่น ให้การเด้งดูละมุนไม่แข็ง
+    BoobStiffness = 8,
+    BoobDamping = 0.2,
     BoobSize = 1.0,
 
-    -- ความเคลื่อนไหวและเกรียน (Movement & Troll)
+    -- Movement
     SpeedHack = false,
     WalkSpeedValue = 16,
     JumpHack = false,
@@ -81,387 +59,287 @@ local Settings = {
     BigHead = false,
     HeadSize = 5,
 
-    -- ระบบป้องกัน
     AntiAFK = true
 }
 
 local CurrentTarget = nil
-local LockedTarget = nil
-local ESP_CACHE = {}
-local HIGHLIGHT_CACHE = {}
-local TRACER_CACHE = {}
+local ESP_Objects = {}
 local OriginalHeadSizes = {}
 
 --------------------------------------------------
--- ระบบสปริงฟิสิกส์ (Spring Engine ละมุน 3 มิติ)
---------------------------------------------------
-local Spring = {
-    Position = Vector3.new(0, 0, 0),
-    Velocity = Vector3.new(0, 0, 0),
-    Target = Vector3.new(0, 0, 0)
-}
-
-function Spring:Update(dt, stiffness, damping)
-    local force = (self.Target - self.Position) * stiffness
-    self.Velocity = (self.Velocity + force * dt) * (1 - math.clamp(damping, 0, 1))
-    self.Position = self.Position + self.Velocity * dt
-    return self.Position
-end
-
---------------------------------------------------
--- ระบบสร้างโมเดลหน้าอกละมุนทรงหยดน้ำ (Realistic Tear-Drop Boobs)
+-- REALISTIC SOFT BOOB PHYSICS (แก้ไขสปริงและน้ำหนักเหวี่ยง)
 --------------------------------------------------
 local CreatedBoobs = {}
 local LeftWeld, RightWeld = nil, nil
-local BaseLeftC0 = CFrame.new(-0.42, 0.2, -0.6)
-local BaseRightC0 = CFrame.new(0.42, 0.2, -0.6)
-local LastHRPPosition = nil
-local LastCameraRotation = Camera.CFrame.LookVector
+local BaseLeftC0 = CFrame.new(-0.43, 0.15, -0.55)
+local BaseRightC0 = CFrame.new(0.43, 0.15, -0.55)
+
+local PhysPos = Vector3.new(0,0,0)
+local PhysVel = Vector3.new(0,0,0)
+local LastCharPos = nil
 
 local function removeBoobs()
-    for _, item in ipairs(CreatedBoobs) do
-        if item and item.Parent then item:Destroy() end
+    for _, v in ipairs(CreatedBoobs) do
+        if v and v.Parent then v:Destroy() end
     end
     CreatedBoobs = {}
     LeftWeld, RightWeld = nil, nil
 end
 
-local function createSoftPart(character, cframeOffset, size, color, parentWeldTo, shape)
-    local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+local function makePart(char, cf, sz, col, parentWeld)
+    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
     if not torso then return nil end
 
-    local part = Instance.new("Part")
-    part.Shape = shape or Enum.PartType.Ball
-    part.Size = size
-    part.Color = color
-    part.Material = Enum.Material.SmoothPlastic
-    part.CanCollide = false
-    part.Massless = true
-    part.Parent = character
+    local p = Instance.new("Part")
+    p.Shape = Enum.PartType.Ball
+    p.Size = sz
+    p.Color = col
+    p.Material = Enum.Material.SmoothPlastic
+    p.CanCollide = false
+    p.Massless = true
+    p.Parent = char
 
-    local weld = Instance.new("Weld")
-    weld.Part0 = parentWeldTo or torso
-    weld.Part1 = part
-    weld.C0 = cframeOffset
-    weld.Parent = part
+    local w = Instance.new("Weld")
+    w.Part0 = parentWeld or torso
+    w.Part1 = p
+    w.C0 = cf
+    w.Parent = p
 
-    table.insert(CreatedBoobs, part)
-    return part, weld
+    table.insert(CreatedBoobs, p)
+    return p, w
 end
 
 local function applyBoobs()
     removeBoobs()
     local char = LocalPlayer.Character
-    if not isCharValid(char) then return end
+    if not char or not char.Parent then return end
 
-    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
     local head = char:FindFirstChild("Head")
+    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
     if not torso then return end
 
-    local skinColor = head and head.Color or torso.Color
-    local pinkAreolaColor = Color3.fromRGB(255, 145, 165)
-    local pinkNippleColor = Color3.fromRGB(255, 110, 140)
-    local sz = Settings.BoobSize
+    local skinCol = head and head.Color or torso.Color
+    local pink1 = Color3.fromRGB(255, 140, 160)
+    local pink2 = Color3.fromRGB(255, 90, 125)
+    local s = Settings.BoobSize
 
-    -- สร้างฐานเต้านมทรงหยดน้ำ (ซ้อนก้อนไล่ระดับให้ดูละมุน ไม่สั้นแข็งเป็นก้อนกลม)
-    local leftBase, lW = createSoftPart(char, BaseLeftC0, Vector3.new(1.1 * sz, 1.25 * sz, 1.2 * sz), skinColor)
-    local rightBase, rW = createSoftPart(char, BaseRightC0, Vector3.new(1.1 * sz, 1.25 * sz, 1.2 * sz), skinColor)
+    -- ฐานเต้าทรงหยดน้ำซ้อนเพื่อให้ดูนุ่มละมุน
+    local lMain, lW = makePart(char, BaseLeftC0, Vector3.new(1.1 * s, 1.25 * s, 1.2 * s), skinCol)
+    local rMain, rW = makePart(char, BaseRightC0, Vector3.new(1.1 * s, 1.25 * s, 1.2 * s), skinCol)
     LeftWeld = lW
     RightWeld = rW
 
-    -- เสริมความนุ่มมนด้านล่าง
-    createSoftPart(char, CFrame.new(0, -0.15 * sz, 0.05 * sz), Vector3.new(1.0 * sz, 1.0 * sz, 1.1 * sz), skinColor, leftBase)
-    createSoftPart(char, CFrame.new(0, -0.15 * sz, 0.05 * sz), Vector3.new(1.0 * sz, 1.0 * sz, 1.1 * sz), skinColor, rightBase)
+    makePart(char, CFrame.new(0, -0.15 * s, 0.05 * s), Vector3.new(1.0 * s, 1.0 * s, 1.1 * s), skinCol, lMain)
+    makePart(char, CFrame.new(0, -0.15 * s, 0.05 * s), Vector3.new(1.0 * s, 1.0 * s, 1.1 * s), skinCol, rMain)
 
-    -- ปานนมละมุน
-    createSoftPart(char, CFrame.new(0, 0.02, -0.58 * sz), Vector3.new(0.42 * sz, 0.42 * sz, 0.1 * sz), pinkAreolaColor, leftBase)
-    createSoftPart(char, CFrame.new(0, 0.02, -0.58 * sz), Vector3.new(0.42 * sz, 0.42 * sz, 0.1 * sz), pinkAreolaColor, rightBase)
-
-    -- ปลายหัวนม
-    createSoftPart(char, CFrame.new(0, 0.02, -0.62 * sz), Vector3.new(0.18 * sz, 0.18 * sz, 0.12 * sz), pinkNippleColor, leftBase)
-    createSoftPart(char, CFrame.new(0, 0.02, -0.62 * sz), Vector3.new(0.18 * sz, 0.18 * sz, 0.12 * sz), pinkNippleColor, rightBase)
+    -- ปานนมและหัวนม
+    makePart(char, CFrame.new(0, 0, -0.58 * s), Vector3.new(0.4 * s, 0.4 * s, 0.08 * s), pink1, lMain)
+    makePart(char, CFrame.new(0, 0, -0.58 * s), Vector3.new(0.4 * s, 0.4 * s, 0.08 * s), pink1, rMain)
+    makePart(char, CFrame.new(0, 0, -0.61 * s), Vector3.new(0.16 * s, 0.16 * s, 0.1 * s), pink2, lMain)
+    makePart(char, CFrame.new(0, 0, -0.61 * s), Vector3.new(0.16 * s, 0.16 * s, 0.1 * s), pink2, rMain)
 end
 
--- คำนวณความเด้งละมุนตาม Frame
+-- คำนวณฟิสิกส์การทิ้งน้ำหนักและเด้งละมุน
 RunService.RenderStepped:Connect(function(dt)
     if Settings.BoobFeature and LocalPlayer.Character then
         local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if hrp and LeftWeld and RightWeld then
-            local currentPos = hrp.Position
-            local currentCamLook = Camera.CFrame.LookVector
-
-            if LastHRPPosition then
-                -- แรงจากการเคลื่อนที่ตัวละคร
-                local velocity = (currentPos - LastHRPPosition) / dt
-                local localVel = hrp.CFrame:VectorToObjectSpace(velocity)
-
-                -- แรงหมุนกล้อง (ให้หน้าอกทิ้งน้ำหนักตามการสะบัดกล้อง)
-                local camRotDelta = (currentCamLook - LastCameraRotation) * 5
-
-                Spring.Target = Vector3.new(
-                    math.clamp((-localVel.X * 0.015) - camRotDelta.X, -0.35, 0.35),
-                    math.clamp((-localVel.Y * 0.022) - camRotDelta.Y, -0.45, 0.45),
-                    math.clamp((localVel.Z * 0.015), -0.3, 0.3)
+            local pos = hrp.Position
+            if LastCharPos then
+                local deltaPos = (pos - LastCharPos)
+                local moveVel = hrp.CFrame:VectorToObjectSpace(deltaPos / dt)
+                
+                local targetOff = Vector3.new(
+                    math.clamp(-moveVel.X * 0.015, -0.4, 0.4),
+                    math.clamp(-moveVel.Y * 0.025, -0.5, 0.5),
+                    math.clamp(moveVel.Z * 0.015, -0.3, 0.3)
                 )
+
+                local force = (targetOff - PhysPos) * Settings.BoobStiffness
+                PhysVel = (PhysVel + force * dt) * (1 - math.clamp(Settings.BoobDamping, 0, 1))
+                PhysPos = PhysPos + PhysVel * dt
             end
-            LastHRPPosition = currentPos
-            LastCameraRotation = currentCamLook
+            LastCharPos = pos
 
-            local offset = Spring:Update(dt, Settings.BoobStiffness, Settings.BoobDamping)
-
-            -- การบิดตัวละมุน (Squash & Stretch Dynamics)
-            LeftWeld.C0 = BaseLeftC0 * CFrame.new(offset) * CFrame.Angles(offset.Y * 0.9, -offset.X * 0.7, offset.X * 0.3)
-            RightWeld.C0 = BaseRightC0 * CFrame.new(offset) * CFrame.Angles(offset.Y * 0.9, offset.X * 0.7, -offset.X * 0.3)
+            LeftWeld.C0 = BaseLeftC0 * CFrame.new(PhysPos) * CFrame.Angles(PhysPos.Y * 0.8, -PhysPos.X * 0.7, PhysPos.X * 0.3)
+            RightWeld.C0 = BaseRightC0 * CFrame.new(PhysPos) * CFrame.Angles(PhysPos.Y * 0.8, PhysPos.X * 0.7, -PhysPos.X * 0.3)
         end
     else
-        LastHRPPosition = nil
-    end
-end)
-
-LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(1)
-    if Settings.BoobFeature then applyBoobs() end
-end)--[[ 
-    ส่วนที่ 2/2: ระบบการต่อสู้ ESP และ UI ภาษาไทย
+        LastCharPos = nil
+    end--[[ 
+    ส่วนที่ 2/2: Target Lock, Fixed Drawing ESP & Interface
 ]]
 
 --------------------------------------------------
--- ฟังก์ชันตรวจจับและตรวจสอบเป้าหมาย
---------------------------------------------------
-local function isAlive(char)
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    return hum and hum.Health > 0
-end
-
-local function isTeammate(p)
-    if not Settings.TeamCheck then return false end
-    return p.Team and LocalPlayer.Team and (p.Team == LocalPlayer.Team)
-end
-
-local RayParams = RaycastParams.new()
-RayParams.FilterType = Enum.RaycastFilterType.Exclude
-RayParams.IgnoreWater = true
-
-local function isVisible(part, char)
-    if not Settings.WallCheck then return true end
-    RayParams.FilterDescendantsInstances = {LocalPlayer.Character, char}
-    local origin = Camera.CFrame.Position
-    local dir = part.Position - origin
-    return Workspace:Raycast(origin, dir, RayParams) == nil
-end
-
-local function getChosenPart(char)
-    if not char then return nil end
-    return char:FindFirstChild(Settings.TargetPart) or char:FindFirstChild("Head")
-end
-
---------------------------------------------------
--- ระบบการจัดการวาด ESP บนหน้าจอ
+-- ระบบวงกลม FOV และ ESP
 --------------------------------------------------
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Thickness = 1.5
 FOVCircle.Filled = false
-FOVCircle.NumSides = 60
+FOVCircle.NumSides = 50
 FOVCircle.Visible = false
+FOVCircle.Color = Color3.fromRGB(0, 255, 150)
 
-local function clearHighlight(char)
-    if HIGHLIGHT_CACHE[char] then
-        pcall(function() HIGHLIGHT_CACHE[char]:Destroy() end)
-        HIGHLIGHT_CACHE[char] = nil
+local function removePlayerESP(p)
+    if ESP_Objects[p] then
+        for _, obj in pairs(ESP_Objects[p]) do
+            pcall(function() obj:Remove() end)
+        end
+        ESP_Objects[p] = nil
     end
 end
 
-local function clearTracer(char)
-    if TRACER_CACHE[char] then
-        pcall(function() TRACER_CACHE[char]:Remove() end)
-        TRACER_CACHE[char] = nil
-    end
-end
-
-local function clearESP(char)
-    local cache = ESP_CACHE[char]
-    if cache then
-        pcall(function()
-            if cache.Text then cache.Text:Remove() end
-            if cache.Box then cache.Box:Remove() end
-            if cache.HealthBg then cache.HealthBg:Remove() end
-            if cache.HealthMain then cache.HealthMain:Remove() end
-        end)
-        ESP_CACHE[char] = nil
-    end
-    clearHighlight(char)
-    clearTracer(char)
-end
-
-local function RenderESP()
+local function UpdateESP()
     for _, p in ipairs(Players:GetPlayers()) do
-        local char = p.Character
-        if p ~= LocalPlayer and isCharValid(char) and isAlive(char) and not isTeammate(p) then
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            local head = char:FindFirstChild("Head")
-            local hum = char:FindFirstChildOfClass("Humanoid")
-
-            if hrp and head and hum then
+        if p ~= LocalPlayer then
+            local char = p.Character
+            local isTeam = Settings.TeamCheck and p.Team and LocalPlayer.Team and (p.Team == LocalPlayer.Team)
+            
+            if char and char:FindFirstChild("HumanoidRootPart") and char:FindFirstChildOfClass("Humanoid") and char.Humanoid.Health > 0 and not isTeam then
+                local hrp = char.HumanoidRootPart
+                local head = char:FindFirstChild("Head") or hrp
+                local pos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
                 local dist = (Camera.CFrame.Position - hrp.Position).Magnitude
-                if dist <= Settings.MaxDistance then
-                    local hrpPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
 
-                    if onScreen then
-                        if not ESP_CACHE[char] then
-                            ESP_CACHE[char] = {
-                                Text = Drawing.new("Text"),
-                                Box = Drawing.new("Square"),
-                                HealthBg = Drawing.new("Square"),
-                                HealthMain = Drawing.new("Square")
-                            }
-                            ESP_CACHE[char].Text.Center = true
-                            ESP_CACHE[char].Text.Outline = true
-                            ESP_CACHE[char].Text.Size = 13
-                            ESP_CACHE[char].Box.Thickness = 1
-                            ESP_CACHE[char].Box.Filled = false
-                            ESP_CACHE[char].HealthBg.Thickness = 1
-                            ESP_CACHE[char].HealthBg.Filled = true
-                            ESP_CACHE[char].HealthBg.Color = Color3.fromRGB(0,0,0)
-                            ESP_CACHE[char].HealthMain.Thickness = 1
-                            ESP_CACHE[char].HealthMain.Filled = true
-                        end
-
-                        local cache = ESP_CACHE[char]
-                        local headPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
-                        local legPos = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3, 0))
-                        local height = math.abs(headPos.Y - legPos.Y)
-                        local width = height / 1.8
-
-                        -- แสดงชื่อและระยะทาง
-                        if Settings.ESP_Name then
-                            cache.Text.Text = string.format("%s [%dm]", p.Name, math.floor(dist))
-                            cache.Text.Position = Vector2.new(hrpPos.X, headPos.Y - 18)
-                            cache.Text.Color = Color3.fromRGB(255, 255, 255)
-                            cache.Text.Visible = true
-                        else
-                            cache.Text.Visible = false
-                        end
-
-                        -- แสดงกล่องสี่เหลี่ยม
-                        if Settings.ESP_Box then
-                            cache.Box.Size = Vector2.new(width, height)
-                            cache.Box.Position = Vector2.new(hrpPos.X - width / 2, headPos.Y)
-                            cache.Box.Color = Color3.fromRGB(0, 255, 150)
-                            cache.Box.Visible = true
-                        else
-                            cache.Box.Visible = false
-                        end
-
-                        -- แสดงหลอดเลือด
-                        if Settings.ESP_Health then
-                            local healthPct = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
-                            local barHeight = height * healthPct
-                            cache.HealthBg.Size = Vector2.new(3, height)
-                            cache.HealthBg.Position = Vector2.new((hrpPos.X - width / 2) - 6, headPos.Y)
-                            cache.HealthBg.Visible = true
-
-                            cache.HealthMain.Size = Vector2.new(1, barHeight)
-                            cache.HealthMain.Position = Vector2.new((hrpPos.X - width / 2) - 5, headPos.Y + (height - barHeight))
-                            cache.HealthMain.Color = Color3.fromRGB(255, 0, 0):Lerp(Color3.fromRGB(0, 255, 0), healthPct)
-                            cache.HealthMain.Visible = true
-                        else
-                            cache.HealthBg.Visible = false
-                            cache.HealthMain.Visible = false
-                        end
-
-                        -- แสดงเส้นชี้ตัว
-                        if Settings.ESP_Tracers then
-                            if not TRACER_CACHE[char] then
-                                TRACER_CACHE[char] = Drawing.new("Line")
-                                TRACER_CACHE[char].Thickness = 1
-                            end
-                            TRACER_CACHE[char].From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                            TRACER_CACHE[char].To = Vector2.new(hrpPos.X, hrpPos.Y)
-                            TRACER_CACHE[char].Color = Settings.TracersColor
-                            TRACER_CACHE[char].Visible = true
-                        else
-                            clearTracer(char)
-                        end
-                    else
-                        clearESP(char)
+                if onScreen and dist <= Settings.MaxDistance then
+                    if not ESP_Objects[p] then
+                        ESP_Objects[p] = {
+                            Box = Drawing.new("Square"),
+                            Name = Drawing.new("Text"),
+                            HealthBg = Drawing.new("Square"),
+                            HealthMain = Drawing.new("Square"),
+                            Tracer = Drawing.new("Line")
+                        }
                     end
+
+                    local esp = ESP_Objects[p]
+                    local headPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
+                    local legPos = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3, 0))
+                    local h = math.abs(headPos.Y - legPos.Y)
+                    local w = h / 1.8
+
+                    -- Box
+                    esp.Box.Visible = Settings.ESP_Box
+                    esp.Box.Size = Vector2.new(w, h)
+                    esp.Box.Position = Vector2.new(pos.X - w/2, headPos.Y)
+                    esp.Box.Color = Color3.fromRGB(0, 255, 150)
+                    esp.Box.Thickness = 1
+
+                    -- Name
+                    esp.Name.Visible = Settings.ESP_Name
+                    esp.Name.Text = string.format("%s [%dm]", p.Name, math.floor(dist))
+                    esp.Name.Size = 14
+                    esp.Name.Center = true
+                    esp.Name.Outline = true
+                    esp.Name.Position = Vector2.new(pos.X, headPos.Y - 16)
+                    esp.Name.Color = Color3.fromRGB(255, 255, 255)
+
+                    -- Health Bar
+                    local hpPct = math.clamp(char.Humanoid.Health / char.Humanoid.MaxHealth, 0, 1)
+                    esp.HealthBg.Visible = Settings.ESP_Health
+                    esp.HealthBg.Size = Vector2.new(3, h)
+                    esp.HealthBg.Position = Vector2.new((pos.X - w/2) - 5, headPos.Y)
+                    esp.HealthBg.Filled = true
+                    esp.HealthBg.Color = Color3.fromRGB(0,0,0)
+
+                    esp.HealthMain.Visible = Settings.ESP_Health
+                    esp.HealthMain.Size = Vector2.new(1, h * hpPct)
+                    esp.HealthMain.Position = Vector2.new((pos.X - w/2) - 4, headPos.Y + (h * (1 - hpPct)))
+                    esp.HealthMain.Filled = true
+                    esp.HealthMain.Color = Color3.fromRGB(255, 0, 0):Lerp(Color3.fromRGB(0, 255, 0), hpPct)
+
+                    -- Tracer
+                    esp.Tracer.Visible = Settings.ESP_Tracers
+                    esp.Tracer.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+                    esp.Tracer.To = Vector2.new(pos.X, pos.Y)
+                    esp.Tracer.Color = Color3.fromRGB(255, 255, 255)
+                    esp.Tracer.Thickness = 1
                 else
-                    clearESP(char)
+                    removePlayerESP(p)
                 end
+            else
+                removePlayerESP(p)
             end
         else
-            if char then clearESP(char) end
+            removePlayerESP(p)
         end
     end
 end
 
---------------------------------------------------
--- ระบบการเลือกเป้าหมาย
---------------------------------------------------
-local function getTarget()
-    if Settings.StickyTarget and LockedTarget and isCharValid(LockedTarget.Parent) then
-        local hum = LockedTarget.Parent:FindFirstChildOfClass("Humanoid")
-        if hum and hum.Health > 0 then return LockedTarget end
-    end
+Players.PlayerRemoving:Connect(removePlayerESP)
 
+--------------------------------------------------
+-- ระบบค้นหาเป้าหมาย (Aim Logic)
+--------------------------------------------------
+local function GetTarget()
     local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     local closest, targetPart = math.huge, nil
 
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and not isTeammate(p) then
+        if p ~= LocalPlayer then
+            local isTeam = Settings.TeamCheck and p.Team and LocalPlayer.Team and (p.Team == LocalPlayer.Team)
             local char = p.Character
-            if isCharValid(char) and isAlive(char) then
-                local part = getChosenPart(char)
-                local hrp = char:FindFirstChild("HumanoidRootPart")
-
-                if part and hrp then
-                    local dist = (Camera.CFrame.Position - hrp.Position).Magnitude
-                    if dist <= Settings.MaxDistance and isVisible(part, char) then
-                        local screenPos, onScreen = Camera:WorldToViewportPoint(part.Position)
-                        if onScreen then
-                            local mouseDist = (Vector2.new(screenPos.X, screenPos.Y) - center).Magnitude
-                            if mouseDist < Settings.FOV and mouseDist < closest then
-                                closest = mouseDist
-                                targetPart = part
-                            end
+            if char and char:FindFirstChildOfClass("Humanoid") and char.Humanoid.Health > 0 and not isTeam then
+                local part = char:FindFirstChild(Settings.TargetPart) or char:FindFirstChild("Head")
+                if part then
+                    local pos, onScreen = Camera:WorldToViewportPoint(part.Position)
+                    if onScreen then
+                        local mDist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                        if mDist <= Settings.FOV and mDist < closest then
+                            closest = mDist
+                            targetPart = part
                         end
                     end
                 end
             end
         end
     end
-
-    if Settings.StickyTarget then LockedTarget = targetPart end
     return targetPart
 end
 
 --------------------------------------------------
--- Loop การทำงานหลัก
+-- Silent Aim Hook
+--------------------------------------------------
+local gmt = getrawmetatable and getrawmetatable(game)
+if gmt and setreadonly then
+    local oldIdx = gmt.__index
+    setreadonly(gmt, false)
+    gmt.__index = newcclosure(function(self, idx)
+        if not checkcaller() and Settings.SilentAim and CurrentTarget then
+            if idx == "Hit" or idx == "CFrame" then
+                return CFrame.new(CurrentTarget.Position)
+            elseif idx == "Target" then
+                return CurrentTarget
+            end
+        end
+        return oldIdx(self, idx)
+    end)
+    setreadonly(gmt, true)
+end
+
+--------------------------------------------------
+-- Main Render Loop
 --------------------------------------------------
 RunService.RenderStepped:Connect(function()
-    CurrentTarget = getTarget()
+    CurrentTarget = GetTarget()
 
-    -- FOV Circle
     FOVCircle.Visible = Settings.ShowFOV
     FOVCircle.Radius = Settings.FOV
     FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    FOVCircle.Color = Settings.FOVColor
 
     -- Camera Lock
     if Settings.CameraLock and CurrentTarget then
-        local targetCFrame = CFrame.new(Camera.CFrame.Position, CurrentTarget.Position)
-        Camera.CFrame = Settings.SmoothLock and Camera.CFrame:Lerp(targetCFrame, Settings.Smoothness) or targetCFrame
+        local targetCF = CFrame.new(Camera.CFrame.Position, CurrentTarget.Position)
+        Camera.CFrame = Settings.SmoothLock and Camera.CFrame:Lerp(targetCF, Settings.Smoothness) or targetCF
     end
 
-    -- ปรับตัวละคร Local Player
+    -- Movement Hacks
     local char = LocalPlayer.Character
-    if isCharValid(char) then
-        local hum = char:FindFirstChildOfClass("Humanoid")
-        if hum then
-            if Settings.SpeedHack then hum.WalkSpeed = Settings.WalkSpeedValue end
-            if Settings.JumpHack then hum.JumpPower = Settings.JumpPowerValue end
-        end
-
+    if char and char:FindFirstChildOfClass("Humanoid") then
+        local hum = char.Humanoid
+        if Settings.SpeedHack then hum.WalkSpeed = Settings.WalkSpeedValue end
+        if Settings.JumpHack then hum.JumpPower = Settings.JumpPowerValue end
+        
         local hrp = char:FindFirstChild("HumanoidRootPart")
         if Settings.Spinbot and hrp then
             hrp.CFrame = hrp.CFrame * CFrame.Angles(0, math.rad(Settings.SpinSpeed), 0)
@@ -479,10 +357,9 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    RenderESP()
+    UpdateESP()
 end)
 
--- กระโดดไม่จำกัด
 UserInputService.JumpRequest:Connect(function()
     if Settings.InfiniteJump and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -490,7 +367,6 @@ UserInputService.JumpRequest:Connect(function()
     end
 end)
 
--- Anti AFK
 LocalPlayer.Idled:Connect(function()
     if Settings.AntiAFK then
         VirtualUser:CaptureController()
@@ -499,49 +375,43 @@ LocalPlayer.Idled:Connect(function()
 end)
 
 --------------------------------------------------
--- เมนูอินเทอร์เฟซภาษาไทย (WindUI)
+-- UI Window ภาษาไทย
 --------------------------------------------------
 local Window = WindUI:CreateWindow({
-    Title = "WindUI | ระบบล็อคและฟิสิกส์เกรียเนียน",
-    Folder = "WindUI_Thai",
-    Size = UDim2.fromOffset(580, 460),
+    Title = "WindUI | ระบบล็อคและนมละมุน (Delta Fix)",
+    Folder = "WindUI_Delta",
+    Size = UDim2.fromOffset(560, 440),
     Transparent = true,
     Theme = "Dark"
 })
 
--- หน้าการต่อสู้
-local CombatTab = Window:Tab({ Title = "การต่อสู้ (Combat)", Icon = "crosshair" })
+local CombatTab = Window:Tab({ Title = "ระบบล็อค (Combat)", Icon = "crosshair" })
 CombatTab:Toggle({ Title = "เปิดใช้งาน Silent Aim", Default = Settings.SilentAim, Callback = function(v) Settings.SilentAim = v end })
 CombatTab:Toggle({ Title = "ล็อคกล้อง (Camera Lock)", Default = Settings.CameraLock, Callback = function(v) Settings.CameraLock = v end })
-CombatTab:Toggle({ Title = "เปิดใช้การล็อคแบบนุ่มนวล (Smooth Lock)", Default = Settings.SmoothLock, Callback = function(v) Settings.SmoothLock = v end })
-CombatTab:Slider({ Title = "ความนุ่มนวลในการล็อค", Min = 0.05, Max = 1, Default = Settings.Smoothness, Callback = function(v) Settings.Smoothness = v end })
-CombatTab:Dropdown({ Title = "อวัยวะเป้าหมาย", Values = {"Head", "HumanoidRootPart", "UpperTorso"}, Default = "Head", Callback = function(v) Settings.TargetPart = v end })
-CombatTab:Toggle({ Title = "ตรวจสอบกำแพงบัง (Wall Check)", Default = Settings.WallCheck, Callback = function(v) Settings.WallCheck = v end })
-CombatTab:Toggle({ Title = "ไม่ล็อคพวกเดียวกัน (Team Check)", Default = Settings.TeamCheck, Callback = function(v) Settings.TeamCheck = v end })
+CombatTab:Toggle({ Title = "ล็อคนุ่มนวล (Smooth Lock)", Default = Settings.SmoothLock, Callback = function(v) Settings.SmoothLock = v end })
+CombatTab:Slider({ Title = "ความนุ่มนวลล็อค", Min = 0.05, Max = 1, Default = Settings.Smoothness, Callback = function(v) Settings.Smoothness = v end })
+CombatTab:Dropdown({ Title = "ตำแหน่งเป้า", Values = {"Head", "HumanoidRootPart", "UpperTorso"}, Default = "Head", Callback = function(v) Settings.TargetPart = v end })
 
--- หน้าการมองเห็น
-local VisualsTab = Window:Tab({ Title = "มองผ่านกำแพง (ESP)", Icon = "eye" })
+local VisualsTab = Window:Tab({ Title = "มองทะลุ (ESP)", Icon = "eye" })
 VisualsTab:Toggle({ Title = "แสดงชื่อผู้เล่น", Default = Settings.ESP_Name, Callback = function(v) Settings.ESP_Name = v end })
 VisualsTab:Toggle({ Title = "แสดงกล่อง (Box ESP)", Default = Settings.ESP_Box, Callback = function(v) Settings.ESP_Box = v end })
 VisualsTab:Toggle({ Title = "แสดงหลอดเลือด (Health Bar)", Default = Settings.ESP_Health, Callback = function(v) Settings.ESP_Health = v end })
-VisualsTab:Toggle({ Title = "แสดงเส้นชี้ตัว (Tracers)", Default = Settings.ESP_Tracers, Callback = function(v) Settings.ESP_Tracers = v end })
+VisualsTab:Toggle({ Title = "แสดงเส้นชี้เป้า (Tracers)", Default = Settings.ESP_Tracers, Callback = function(v) Settings.ESP_Tracers = v end })
 VisualsTab:Toggle({ Title = "แสดงวงกลม FOV", Default = Settings.ShowFOV, Callback = function(v) Settings.ShowFOV = v end })
 VisualsTab:Slider({ Title = "ขนาดวงกลม FOV", Min = 30, Max = 800, Default = Settings.FOV, Callback = function(v) Settings.FOV = v end })
 
--- หน้าฟิสิกส์นมละมุนและตัวละคร
-local PhysicsTab = Window:Tab({ Title = "ฟิสิกส์นมเด้ง & เกรียน", Icon = "user" })
-PhysicsTab:Toggle({ Title = "เปิดใช้งาน ฟิสิกส์นมเด้งละมุน", Default = Settings.BoobFeature, Callback = function(v)
+local PhysicsTab = Window:Tab({ Title = "นมเด้งละมุน", Icon = "user" })
+PhysicsTab:Toggle({ Title = "เปิดระบบนมเด้งละมุน", Default = Settings.BoobFeature, Callback = function(v)
     Settings.BoobFeature = v
     if v then applyBoobs() else removeBoobs() end
 end })
-PhysicsTab:Slider({ Title = "ความยืดหยุ่น (นุ่มนวล)", Min = 5, Max = 30, Default = Settings.BoobStiffness, Callback = function(v) Settings.BoobStiffness = v end })
+PhysicsTab:Slider({ Title = "ความซับแรงเด้ง (นุ่มนวล)", Min = 3, Max = 25, Default = Settings.BoobStiffness, Callback = function(v) Settings.BoobStiffness = v end })
 PhysicsTab:Slider({ Title = "ขนาดหน้าอก", Min = 0.5, Max = 2.5, Default = Settings.BoobSize, Callback = function(v)
     Settings.BoobSize = v
     if Settings.BoobFeature then applyBoobs() end
 end })
 
--- หน้าการเคลื่อนไหว
-local MiscTab = Window:Tab({ Title = "การเคลื่อนไหว (Movement)", Icon = "run" })
+local MiscTab = Window:Tab({ Title = "การเคลื่อนไหว", Icon = "run" })
 MiscTab:Toggle({ Title = "เปิดใช้ Speed Hack", Default = Settings.SpeedHack, Callback = function(v) Settings.SpeedHack = v end })
 MiscTab:Slider({ Title = "ความเร็วเดิน (WalkSpeed)", Min = 16, Max = 250, Default = Settings.WalkSpeedValue, Callback = function(v) Settings.WalkSpeedValue = v end })
 MiscTab:Toggle({ Title = "เปิดใช้ Jump Hack", Default = Settings.JumpHack, Callback = function(v) Settings.JumpHack = v end })
@@ -550,5 +420,6 @@ MiscTab:Toggle({ Title = "กระโดดได้เรื่อยๆ (Inf 
 MiscTab:Toggle({ Title = "หมุนตัว (Spinbot)", Default = Settings.Spinbot, Callback = function(v) Settings.Spinbot = v end })
 MiscTab:Toggle({ Title = "หัวใหญ่ (Big Head)", Default = Settings.BigHead, Callback = function(v) Settings.BigHead = v end })
 
-WindUI:Notify({ Title = "โหลดสำเร็จ!", Content = "สคริปต์ภาษาไทย + ESP + นมเด้งละมุน พร้อมใช้งานแล้ว", Duration = 4 })
+WindUI:Notify({ Title = "อัปเดตระบบแล้ว!", Content = "แก้ไข ESP และระบบฟิสิกส์ให้สมจริงบน Delta เรียบร้อย", Duration = 4 })
 
+end)
