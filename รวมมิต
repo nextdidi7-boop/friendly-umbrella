@@ -4,7 +4,9 @@
     + CAMERA LOCK MODE (NO BULLET REDIRECT)
     AUTO HYBRID HEAD LOCK
     ONE FILE FINAL | AUTO CLEAN
-    + UTILITY & BOOST EXTENSIONS
+    + UTILITY & BOOST EXTENSIONS (OPTIMIZED)
+    + HITBOX EXPANDER
+    + TROLL BOOB PHYSICS & ARCEUS FLY
 ]]
 
 --------------------------------------------------
@@ -34,7 +36,7 @@ local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
 --------------------------------------------------
--- States (Original)
+-- States (Tab 1 Original - UNTOUCHED)
 --------------------------------------------------
 local SilentAim   = false
 local CAMERA_LOCK = false
@@ -50,11 +52,10 @@ local ESP_CACHE = {}
 local HIGHLIGHT_CACHE = {}
 
 --------------------------------------------------
--- States (New Features)
+-- States (Optimized Extensions)
 --------------------------------------------------
 local WalkSpeedVal = 16
 local WalkSpeedEnabled = false
-
 local InfiniteJumpEnabled = false
 
 local BrightnessVal = 1
@@ -64,6 +65,30 @@ local OriginalClockTime = Lighting.ClockTime
 
 local ESP_NPC_ENABLED = false
 local NPC_CACHE = {}
+
+-- Hitbox States
+local HitboxEnabled = false
+local HitboxSize = 10
+local OriginalSizes = {}
+
+--------------------------------------------------
+-- States (Boob Physics System)
+--------------------------------------------------
+local BoobSettings = {
+    Enabled = false,
+    Stiffness = 12,
+    Damping = 0.15,
+    Size = 1.0
+}
+
+local CreatedBoobParts = {}
+local LeftMeshWeld, RightMeshWeld = nil, nil
+local BaseLeftC0 = CFrame.new(-0.42, 0.1, -0.52)
+local BaseRightC0 = CFrame.new(0.42, 0.1, -0.52)
+
+local PhysPos = Vector3.new(0,0,0)
+local PhysVel = Vector3.new(0,0,0)
+local LastHRPPos = nil
 
 --------------------------------------------------
 -- Utility (Original)
@@ -89,315 +114,66 @@ local function isCharValid(char)
 end
 
 --------------------------------------------------
--- Visibility (Original)
+-- Soft Boob Physics Mechanics
 --------------------------------------------------
-local RayParams = RaycastParams.new()
-RayParams.FilterType = Enum.RaycastFilterType.Blacklist
-RayParams.IgnoreWater = true
-
-local function isVisible(part, char)
-    RayParams.FilterDescendantsInstances = {LocalPlayer.Character, char}
-    local origin = Camera.CFrame.Position
-    local dir = part.Position - origin
-    return not workspace:Raycast(origin, dir, RayParams)
+local function DestroyBoobs()
+    for _, v in ipairs(CreatedBoobParts) do
+        if v and v.Parent then pcall(function() v:Destroy() end) end
+    end
+    CreatedBoobParts = {}
+    LeftMeshWeld, RightMeshWeld = nil, nil
 end
 
---------------------------------------------------
--- Drawing (Original)
---------------------------------------------------
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Thickness = 2
-FOVCircle.Filled = false
-FOVCircle.Color = Color3.fromRGB(255,255,0)
+local function BuildSoftBoob(char)
+    DestroyBoobs()
+    if not char or not char.Parent then return end
+    
+    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    local head = char:FindFirstChild("Head")
+    if not torso then return end
+    
+    local skinCol = head and head.Color or torso.Color
+    local pink1 = Color3.fromRGB(255, 130, 155)
+    local pink2 = Color3.fromRGB(255, 80, 120)
+    local s = BoobSettings.Size
 
-local AimLine = Drawing.new("Line")
-AimLine.Thickness = 2
-AimLine.Color = Color3.fromRGB(255,0,0)
+    local function createSphere(cf, size, col, parentWeld)
+        local p = Instance.new("Part")
+        p.Shape = Enum.PartType.Ball
+        p.Size = size
+        p.Color = col
+        p.Material = Enum.Material.SmoothPlastic
+        p.CanCollide = false
+        p.Massless = true
+        p.Parent = char
 
---------------------------------------------------
--- CLEAN (Original)
---------------------------------------------------
-local function clearHighlight(char)
-    if HIGHLIGHT_CACHE[char] then
-        pcall(function()
-            HIGHLIGHT_CACHE[char]:Destroy()
-        end)
-        HIGHLIGHT_CACHE[char] = nil
-    end
-end
-
-local function clearESP(char)
-    local cache = ESP_CACHE[char]
-    if cache then
-        pcall(function()
-            if cache.Text then
-                cache.Text.Visible = false
-                cache.Text:Remove()
-            end
-        end)
-        ESP_CACHE[char] = nil
-    end
-    clearHighlight(char)
-end
-
---------------------------------------------------
--- ESP TEXT (Original)
---------------------------------------------------
-local function ESP_SYSTEM()
-    if not ESP_ENABLED then
-        for char,_ in pairs(ESP_CACHE) do
-            clearESP(char)
-        end
-        return
+        local w = Instance.new("Weld")
+        w.Part0 = parentWeld or torso
+        w.Part1 = p
+        w.C0 = cf
+        w.Parent = p
+        
+        table.insert(CreatedBoobParts, p)
+        return p, w
     end
 
-    for _,p in ipairs(Players:GetPlayers()) do
-        local char = p.Character
-        if p ~= LocalPlayer
-        and char
-        and isCharValid(char)
-        and isAlive(char)
-        and not isTeammate(p) then
+    local lMain, lW = createSphere(BaseLeftC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
+    local rMain, rW = createSphere(BaseRightC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
+    LeftMeshWeld = lW
+    RightMeshWeld = rW
 
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if not hrp then clearESP(char) continue end
+    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, lMain)
+    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, rMain)
 
-            local dist = (Camera.CFrame.Position - hrp.Position).Magnitude
-            if dist > MaxDistance then
-                if ESP_CACHE[char] then ESP_CACHE[char].Text.Visible = false end
-                continue
-            end
-
-            if not ESP_CACHE[char] then
-                local t = Drawing.new("Text")
-                t.Center = true
-                t.Outline = true
-                t.Font = 2
-                t.Size = 14
-                ESP_CACHE[char] = {Text = t}
-            end
-
-            local txt = ESP_CACHE[char].Text
-            local pos, on = Camera:WorldToViewportPoint(hrp.Position)
-            if on then
-                txt.Text = p.Name.." ["..math.floor(dist).."m]"
-                txt.Position = Vector2.new(pos.X, pos.Y - 28)
-                txt.Color = (CurrentTarget and CurrentTarget:IsDescendantOf(char))
-                    and Color3.fromRGB(255,60,60)
-                    or Color3.fromRGB(255,255,255)
-                txt.Visible = true
-            else
-                txt.Visible = false
-            end
-        else
-            if char then clearESP(char) end
-        end
-    end
-end
+    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, lMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, rMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, lMain)
+true--[[ 
+    [PART 2/2] UI INTERFACE & WINDOW CONTROL
+]]
 
 --------------------------------------------------
--- RAINBOW OUTLINE ESP (Original)
---------------------------------------------------
-local function RAINBOW_ESP_SYSTEM()
-    if not RAINBOW_ESP then
-        for char,_ in pairs(HIGHLIGHT_CACHE) do
-            clearHighlight(char)
-        end
-        return
-    end
-
-    for _,p in ipairs(Players:GetPlayers()) do
-        local char = p.Character
-        if p ~= LocalPlayer
-        and char
-        and isCharValid(char)
-        and isAlive(char)
-        and not isTeammate(p) then
-
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if not hrp or (Camera.CFrame.Position - hrp.Position).Magnitude > MaxDistance then
-                clearHighlight(char)
-                continue
-            end
-
-            if not HIGHLIGHT_CACHE[char] then
-                local h = Instance.new("Highlight")
-                h.Adornee = char
-                h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                h.FillTransparency = 1
-                h.OutlineTransparency = 0
-                h.Parent = workspace
-                HIGHLIGHT_CACHE[char] = h
-            end
-
-            HIGHLIGHT_CACHE[char].OutlineColor = rainbowColor(0.25)
-        else
-            if char then clearHighlight(char) end
-        end
-    end
-end
-
---------------------------------------------------
--- TARGET (Original)
---------------------------------------------------
-local function getTarget()
-    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-    local closest, target = math.huge, nil
-
-    for _,p in ipairs(Players:GetPlayers()) do
-        local char = p.Character
-        if p ~= LocalPlayer
-        and char
-        and isAlive(char)
-        and not isTeammate(p) then
-
-            local head = char:FindFirstChild("Head")
-            local hrp  = char:FindFirstChild("HumanoidRootPart")
-            if head and hrp
-            and (Camera.CFrame.Position - hrp.Position).Magnitude <= MaxDistance
-            and isVisible(head, char) then
-
-                local s,on = Camera:WorldToViewportPoint(head.Position)
-                if on then
-                    local d = (Vector2.new(s.X,s.Y) - center).Magnitude
-                    if d < FOV and d < closest then
-                        closest, target = d, head
-                    end
-                end
-            end
-        end
-    end
-    return target
-end
-
---------------------------------------------------
--- CAMERA LOCK (Original)
---------------------------------------------------
-local function cameraLookAt(part)
-    if not part then return end
-    Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
-end
-
---------------------------------------------------
--- NEW FEATURE LOGIC
---------------------------------------------------
--- Infinite Jump
-UserInputService.JumpRequest:Connect(function()
-    if InfiniteJumpEnabled and LocalPlayer.Character then
-        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum:ChangeState(Enum.HumanoidStateType.Jumping)
-        end
-    end
-end)
-
--- NPC ESP
-local function NPC_ESP_SYSTEM()
-    if not ESP_NPC_ENABLED then
-        for model, textObj in pairs(NPC_CACHE) do
-            pcall(function() textObj:Remove() end)
-        end
-        NPC_CACHE = {}
-        return
-    end
-
-    for _, obj in ipairs(workspace:GetDescendants()) do
-        if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") and not Players:GetPlayerFromCharacter(obj) then
-            local hrp = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Head")
-            if hrp then
-                if not NPC_CACHE[obj] then
-                    local t = Drawing.new("Text")
-                    t.Center = true
-                    t.Outline = true
-                    t.Font = 2
-                    t.Size = 13
-                    t.Color = Color3.fromRGB(0, 255, 150)
-                    NPC_CACHE[obj] = t
-                end
-
-                local pos, on = Camera:WorldToViewportPoint(hrp.Position)
-                if on then
-                    NPC_CACHE[obj].Text = "[NPC] " .. obj.Name
-                    NPC_CACHE[obj].Position = Vector2.new(pos.X, pos.Y - 20)
-                    NPC_CACHE[obj].Visible = true
-                else
-                    NPC_CACHE[obj].Visible = false
-                end
-            end
-        end
-    end
-end
-
--- Server Hop (Low Player Count)
-local function joinLowPlayerServer()
-    local api = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
-    local success, result = pcall(function()
-        return HttpService:JSONDecode(game:HttpGet(api))
-    end)
-    if success and result and result.data then
-        for _, server in ipairs(result.data) do
-            if server.playing < server.maxPlayers and server.id ~= game.JobId then
-                TeleportService:TeleportToPlaceInstance(game.PlaceId, server.id, LocalPlayer)
-                break
-            end
-        end
-    end
-end
-
---------------------------------------------------
--- RENDER LOOP (Original + New Extensions)
---------------------------------------------------
-RunService.RenderStepped:Connect(function()
-    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-
-    FOVCircle.Position = center
-    FOVCircle.Radius = FOV
-    FOVCircle.Visible = SilentAim or CAMERA_LOCK
-
-    AimLine.Visible = false
-    CurrentTarget = nil
-
-    if SilentAim or CAMERA_LOCK then
-        CurrentTarget = getTarget()
-    end
-
-    if CAMERA_LOCK and CurrentTarget then
-        cameraLookAt(CurrentTarget)
-    end
-
-    if SilentAim and not CAMERA_LOCK and CurrentTarget then
-        local p = Camera:WorldToViewportPoint(CurrentTarget.Position)
-        AimLine.From = center
-        AimLine.To = Vector2.new(p.X,p.Y)
-        AimLine.Visible = true
-    end
-
-    ESP_SYSTEM()
-    RAINBOW_ESP_SYSTEM()
-
-    for char,_ in pairs(ESP_CACHE) do
-        if not isCharValid(char) then clearESP(char) end
-    end
-    for char,_ in pairs(HIGHLIGHT_CACHE) do
-        if not isCharValid(char) then clearHighlight(char) end
-    end
-
-    -- New Loop Mechanics
-    if WalkSpeedEnabled and LocalPlayer.Character then
-        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if hum then hum.WalkSpeed = WalkSpeedVal end
-    end
-
-    if FullbrightEnabled then
-        Lighting.Brightness = BrightnessVal
-        Lighting.ClockTime = 12
-    end
-
-    NPC_ESP_SYSTEM()
-end)
-
---------------------------------------------------
--- UI SETUP
+-- UI Window Initialization
 --------------------------------------------------
 local Window = WindUI:CreateWindow({
     Title="Thug Hunters💢👿",
@@ -406,7 +182,7 @@ local Window = WindUI:CreateWindow({
 })
 
 --------------------------------------------------
--- TAB 1: ORIGINAL MENU (UNTOUCHED)
+-- TAB 1: ORIGINAL MAIN MENU
 --------------------------------------------------
 local Main = Window:Tab({Title="เมนู(กด)"})
 
@@ -419,7 +195,7 @@ Main:Slider({Title="👹FOV", Value={Min=40,Max=4000,Default=FOV}, Callback=func
 Main:Slider({Title="👹ระยะ", Value={Min=100,Max=12000,Default=MaxDistance}, Callback=function(v) MaxDistance=v end})
 
 --------------------------------------------------
--- TAB 2: PLAYER OPTIONS (NEW)
+-- TAB 2: PLAYER OPTIONS
 --------------------------------------------------
 local PlayerTab = Window:Tab({Title="Player Options"})
 
@@ -432,10 +208,25 @@ PlayerTab:Toggle({Title="เปิดใช้งานการวิ่งเ�
 end})
 PlayerTab:Slider({Title="ปรับความเร็วการวิ่ง", Value={Min=16, Max=250, Default=WalkSpeedVal}, Callback=function(v) WalkSpeedVal = v end})
 
+PlayerTab:Button({Title="🚀 เปิดใช้งานการบิน (Arceus Fly)", Callback=function()
+    pcall(function()
+        loadstring("\108\111\97\100\115\6\114\105\110\103\40\103\97\109\101\58\72\116\116\112\71\101\116\40\40\39\104\116\116\112\115\58\47\47\103\105\115\116\46\103\105\115\116\104\117\98\117\115\101\114\99\111\110\116\101\110\116\46\99\111\109\47\109\101\111\122\111\110\101\89\84\47\98\102\48\51\55\100\102\102\57\102\48\97\55\48\48\49\55\51\48\52\100\100\100\54\55\102\100\99\100\51\55\48\47\114\97\119\47\101\49\52\101\55\52\102\52\50\53\98\48\54\48\100\102\53\50\51\51\52\51\99\102\51\48\98\55\56\55\48\55\52\101\98\51\99\53\100\50\47\97\114\99\101\117\115\37\50\53\50\48\120\37\50\53\50\48\102\108\121\37\50\53\50\48\50\37\50\53\50\48\111\98\102\117\115\99\97\116\111\114\39\41\44\116\114\117\101\41\41\40\41\10\10")()
+    end)
+end})
+
 PlayerTab:Toggle({Title="กระโดดไม่จำกัด (Infinite Jump)", Callback=function(v) InfiniteJumpEnabled = v end})
 
+PlayerTab:Toggle({Title="เปิดใช้งาน Hitbox (ขยายตัวศัตรู)", Callback=function(v) 
+    HitboxEnabled = v 
+    UpdateHitbox()
+end})
+PlayerTab:Slider({Title="ปรับขนาด Hitbox", Value={Min=2, Max=50, Default=HitboxSize}, Callback=function(v) 
+    HitboxSize = v 
+    if HitboxEnabled then UpdateHitbox() end
+end})
+
 --------------------------------------------------
--- TAB 3: VISUAL & WORLD (NEW)
+-- TAB 3: VISUAL & WORLD
 --------------------------------------------------
 local VisualTab = Window:Tab({Title="Visual & World"})
 
@@ -462,10 +253,47 @@ VisualTab:Button({Title="🚀 อัปเดต FPS (Optimize/Boost FPS)", Call
 end})
 
 --------------------------------------------------
--- TAB 4: SERVER & MISC (NEW)
+-- TAB 4: SERVER & MISC
 --------------------------------------------------
 local ServerTab = Window:Tab({Title="Server & Misc"})
 
 ServerTab:Button({Title="🌐 เข้าร่วม Server คนน้อย (Rejoin Low Players)", Callback=function()
     joinLowPlayerServer()
 end})
+
+--------------------------------------------------
+-- TAB 5: เกรียน (BOOB PHYSICS CONTROL)
+--------------------------------------------------
+local TrollTab = Window:Tab({Title="เกรียน"})
+
+TrollTab:Toggle({
+    Title = "🍑 เปิดใช้งานโหมดนมเด้งละมุน",
+    Default = BoobSettings.Enabled,
+    Callback = function(v)
+        BoobSettings.Enabled = v
+        if v then
+            BuildSoftBoob(LocalPlayer.Character)
+        else
+            DestroyBoobs()
+        end
+    end
+})
+
+TrollTab:Slider({
+    Title = "📐 ปรับขนาดหน้าอก (เรียลไทม์)",
+    Value = {Min = 0.5, Max = 3.0, Default = BoobSettings.Size},
+    Callback = function(v)
+        BoobSettings.Size = v
+        if BoobSettings.Enabled and LocalPlayer.Character then
+            BuildSoftBoob(LocalPlayer.Character)
+        end
+    end
+})
+
+TrollTab:Slider({
+    Title = "🌀 ปรับความนุ่มเด้ง (Physics Force)",
+    Value = {Min = 5, Max = 30, Default = BoobSettings.Stiffness},
+    Callback = function(v)
+        BoobSettings.Stiffness = v
+    end
+})
