@@ -1,0 +1,212 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local TweenService = game:GetService("TweenService")
+local LocalPlayer = Players.LocalPlayer
+
+-- ==========================================
+-- 1. สร้าง UI
+-- ==========================================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "OrbitTargetGui"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+-- ปุ่มเปิด/ปิด UI (วงกลมซ้ายมือตรงกลาง)
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Name = "ToggleMenuBtn"
+toggleBtn.Size = UDim2.new(0, 45, 0, 45)
+toggleBtn.Position = UDim2.new(0, 10, 0.5, -22)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(35, 35, 45)
+toggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+toggleBtn.Text = "🌀"
+toggleBtn.TextSize = 20
+toggleBtn.Font = Enum.Font.GothamBold
+toggleBtn.Parent = screenGui
+
+local toggleCorner = Instance.new("UICorner")
+toggleCorner.CornerRadius = UDim.new(1, 0) -- ทำเป็นวงกลม
+toggleCorner.Parent = toggleBtn
+
+local toggleStroke = Instance.new("UIStroke")
+toggleStroke.Color = Color3.fromRGB(80, 80, 100)
+toggleStroke.Thickness = 2
+toggleStroke.Parent = toggleBtn
+
+-- หน้าต่างหลัก (สี่เหลี่ยมเล็กๆ ตรงกลางหน้าจอ)
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "MainFrame"
+mainFrame.Size = UDim2.new(0, 220, 0, 240)
+mainFrame.Position = UDim2.new(0.5, -110, 0.5, -120)
+mainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+mainFrame.Visible = false
+mainFrame.Parent = screenGui
+
+local frameCorner = Instance.new("UICorner")
+frameCorner.CornerRadius = UDim.new(0, 10)
+frameCorner.Parent = mainFrame
+
+-- หัวข้อ UI
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 0, 35)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "Target Orbit Control"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.TextSize = 14
+titleLabel.Font = Enum.Font.GothamBold
+titleLabel.Parent = mainFrame
+
+-- กรอบ ScrollingList เลือกรายชื่อผู้เล่น
+local scrollList = Instance.new("ScrollingFrame")
+scrollList.Size = UDim2.new(1, -20, 0, 130)
+scrollList.Position = UDim2.new(0, 10, 0, 40)
+scrollList.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+scrollList.BorderSizePixel = 0
+scrollList.CanvasSize = UDim2.new(0, 0, 0, 0)
+scrollList.ScrollBarThickness = 4
+scrollList.Parent = mainFrame
+
+local scrollCorner = Instance.new("UICorner")
+scrollCorner.CornerRadius = UDim.new(0, 6)
+scrollCorner.Parent = scrollList
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.SortOrder = Enum.SortOrder.LayoutOrder
+listLayout.Padding = UDim.new(0, 4)
+listLayout.Parent = scrollList
+
+-- ปุ่มเปิด/ปิดการทำงาน (ด้านล่าง)
+local actionBtn = Instance.new("TextButton")
+actionBtn.Size = UDim2.new(1, -20, 0, 35)
+actionBtn.Position = UDim2.new(0, 10, 1, -45)
+actionBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 100)
+actionBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+actionBtn.Text = "START ORBIT"
+actionBtn.TextSize = 13
+actionBtn.Font = Enum.Font.GothamBold
+actionBtn.Parent = mainFrame
+
+local actionCorner = Instance.new("UICorner")
+actionCorner.CornerRadius = UDim.new(0, 6)
+actionCorner.Parent = actionBtn
+
+-- ==========================================
+-- 2. ระบบการทำงาน (Logic)
+-- ==========================================
+local selectedPlayer = nil
+local isOrbiting = false
+local orbitConnection = nil
+local angle = 0
+
+-- สลับเปิด/ปิด หน้าต่างหลัก
+toggleBtn.MouseButton1Click:Connect(function()
+	mainFrame.Visible = not mainFrame.Visible
+end)
+
+-- ฟังก์ชันอัปเดตราายชื่อผู้เล่นใน Map
+local function updatePlayerList()
+	for _, child in pairs(scrollList:GetChildren()) do
+		if child:IsA("TextButton") then
+			child:Destroy()
+		end
+	end
+
+	for _, player in pairs(Players:GetPlayers()) do
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.new(1, -8, 0, 28)
+		btn.BackgroundColor3 = (selectedPlayer == player) and Color3.fromRGB(60, 60, 90) or Color3.fromRGB(35, 35, 45)
+		btn.TextColor3 = Color3.fromRGB(220, 220, 220)
+		btn.Text = player.DisplayName .. " (@" .. player.Name .. ")"
+		btn.TextSize = 11
+		btn.Font = Enum.Font.Gotham
+		btn.Parent = scrollList
+
+		local btnCorner = Instance.new("UICorner")
+		btnCorner.CornerRadius = UDim.new(0, 4)
+		btnCorner.Parent = btn
+
+		btn.MouseButton1Click:Connect(function()
+			selectedPlayer = player
+			updatePlayerList() -- รีเฟรชสีปุ่มที่เลือก
+		end)
+	end
+	
+	scrollList.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y + 10)
+end
+
+Players.PlayerAdded:Connect(updatePlayerList)
+Players.PlayerRemoving:Connect(updatePlayerList)
+updatePlayerList()
+
+-- ฟังก์ชันคัดแยกพาร์ทที่สามารถดึงมาหมุนได้
+local function getNearbyParts(centerPos, radius)
+	local parts = {}
+	for _, object in pairs(workspace:GetDescendants()) do
+		if object:IsA("BasePart") and not object.Anchored and not object:IsDescendantOf(Players.LocalPlayer.Character) then
+			-- ข้ามพาร์ทที่เป็นของตัวผู้เล่นอื่นเพื่อไม่ให้ตัวละครบั๊ก
+			local isCharacterPart = false
+			for _, p in pairs(Players:GetPlayers()) do
+				if p.Character and object:IsDescendantOf(p.Character) then
+					isCharacterPart = true
+					break
+				end
+			end
+			
+			if not isCharacterPart and (object.Position - centerPos).Magnitude <= radius then
+				table.insert(parts, object)
+			end
+		end
+	end
+	return parts
+end
+
+-- ระบบดึงของหมุนด้วยความเร็วสูง
+actionBtn.MouseButton1Click:Connect(function()
+	if isOrbiting then
+		-- ปิดการทำงาน
+		isOrbiting = false
+		actionBtn.Text = "START ORBIT"
+		actionBtn.BackgroundColor3 = Color3.fromRGB(0, 170, 100)
+		if orbitConnection then
+			orbitConnection:Disconnect()
+			orbitConnection = nil
+		end
+	else
+		-- เปิดการทำงาน
+		if not selectedPlayer or not selectedPlayer.Character or not selectedPlayer.Character:FindFirstChild("HumanoidRootPart") then
+			actionBtn.Text = "SELECT A PLAYER!"
+			task.wait(1)
+			actionBtn.Text = "START ORBIT"
+			return
+		end
+
+		isOrbiting = true
+		actionBtn.Text = "STOP ORBIT"
+		actionBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+
+		local speed = 15 -- ความเร็วในการหมุน (ยิ่งเยอะยิ่งเร็ว)
+		local radius = 6 -- ระยะห่างจากตัวผู้เล่น
+
+		orbitConnection = RunService.Heartbeat:Connect(function(dt)
+			if not isOrbiting or not selectedPlayer or not selectedPlayer.Character or not selectedPlayer.Character:FindFirstChild("HumanoidRootPart") then
+				return
+			end
+
+			local targetHRP = selectedPlayer.Character.HumanoidRootPart
+			local centerPos = targetHRP.Position
+			local parts = getNearbyParts(centerPos, 50) -- ดึงของในระยะ 50 บล็อก
+
+			angle = angle + (dt * speed)
+
+			for index, part in ipairs(parts) do
+				-- คำนวณตำแหน่งวงกลมแบบกระจายตัวตามจำนวนพาร์ท
+				local offsetAngle = angle + ((index / #parts) * math.pi * 2)
+				local targetX = centerPos.X + math.cos(offsetAngle) * radius
+				local targetZ = centerPos.Z + math.sin(offsetAngle) * radius
+				local targetY = centerPos.Y + math.sin(angle * 2 + index) * 2 -- ขยับขึ้นลงเล็กน้อยเพิ่มความสมจริง
+
+				-- บังคับฟิสิกส์ให้พาร์ทพุ่งไปที่จุดหมุน
+				part.Velocity = (Vector3.new(targetX, targetY, targetZ) - part.Position) * 30
+			end
+		end)
+	end
+end)
