@@ -1,10 +1,10 @@
 --[[ 
-    WindUI | ULTIMATE COMBAT, ESP, MOVEMENT & TROLL SUITE (PHYSICS BOOBS UPDATE)
-    Fixes & Optimized for Immediate Execution
+    WindUI | ULTIMATE COMBAT, ESP, MOVEMENT & TROLL SUITE
+    PART 1/2: CORE ENGINE & LOGIC
 ]]
 
 --------------------------------------------------
--- Helper Functions (Declared First to Prevent Nil Errors)
+-- Helper Functions
 --------------------------------------------------
 local function isCharValid(char)
     return char and char.Parent and char:IsDescendantOf(workspace)
@@ -60,7 +60,6 @@ local Settings = {
     ESP_Health = false,
     ESP_RainbowHighlight = false,
     ESP_Tracers = false,
-    ESP_Chams = false,
     ChamsColor = Color3.fromRGB(255, 0, 100),
     TracersColor = Color3.fromRGB(255, 255, 255),
 
@@ -86,9 +85,6 @@ local Settings = {
     JumpHack = false,
     JumpPowerValue = 50,
     InfiniteJump = false,
-    Noclip = false,
-    Fly = false,
-    FlySpeed = 50,
 
     -- System
     AntiAFK = true
@@ -98,7 +94,6 @@ local CurrentTarget = nil
 local LockedTarget = nil
 local ESP_CACHE = {}
 local HIGHLIGHT_CACHE = {}
-local CHAMS_CACHE = {}
 local TRACER_CACHE = {}
 local OriginalHeadSizes = {}
 
@@ -167,9 +162,7 @@ local function applyBoobs()
     local head = char:FindFirstChild("Head")
     if not torso then return end
 
-    local skinColor = torso.Color
-    if head then skinColor = head.Color end
-
+    local skinColor = head and head.Color or torso.Color
     local pinkAreolaColor = Color3.fromRGB(255, 140, 160)
     local pinkNippleColor = Color3.fromRGB(255, 105, 135)
 
@@ -201,7 +194,6 @@ RunService.RenderStepped:Connect(function(dt)
                 )
             end
             LastHRPPosition = currentPos
-
             local offset = Spring:Update(dt, Settings.BoobBounceStiffness, Settings.BoobBounceDamping)
             
             LeftWeld.C0 = BaseLeftC0 * CFrame.new(offset) * CFrame.Angles(offset.Y * 0.8, -offset.X * 0.8, 0)
@@ -216,9 +208,12 @@ LocalPlayer.CharacterAdded:Connect(function()
     task.wait(1)
     if Settings.BoobFeature then applyBoobs() end
 end)
+--[[ 
+    PART 2/2: TARGETING, ESP RENDER, LOOP & WIND UI INTERFACE
+]]
 
 --------------------------------------------------
--- Utility Functions & Raycast Checks
+-- Helpers & Target Selection
 --------------------------------------------------
 local function isAlive(char)
     local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -227,8 +222,7 @@ end
 
 local function isTeammate(p)
     if not Settings.TeamCheck then return false end
-    if not LocalPlayer.Team or not p.Team then return false end
-    return p.Team == LocalPlayer.Team
+    return p.Team and LocalPlayer.Team and (p.Team == LocalPlayer.Team)
 end
 
 local function rainbowColor(speed)
@@ -244,60 +238,33 @@ local function isVisible(part, char)
     RayParams.FilterDescendantsInstances = {LocalPlayer.Character, char}
     local origin = Camera.CFrame.Position
     local dir = part.Position - origin
-    local result = Workspace:Raycast(origin, dir, RayParams)
-    return result == nil
+    return Workspace:Raycast(origin, dir, RayParams) == nil
 end
 
 local function getChosenPart(char)
     if not char then return nil end
     if Settings.TargetPart == "Random" then
-        local parts = {"Head", "HumanoidRootPart", "UpperTorso", "LowerTorso"}
-        local validParts = {}
+        local parts = {"Head", "HumanoidRootPart", "UpperTorso"}
+        local valid = {}
         for _, name in ipairs(parts) do
             local p = char:FindFirstChild(name)
-            if p then table.insert(validParts, p) end
+            if p then table.insert(valid, p) end
         end
-        return #validParts > 0 and validParts[math.random(1, #validParts)] or char:FindFirstChild("Head")
-    else
-        return char:FindFirstChild(Settings.TargetPart) or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+        return #valid > 0 and valid[math.random(1, #valid)] or char:FindFirstChild("Head")
     end
+    return char:FindFirstChild(Settings.TargetPart) or char:FindFirstChild("Head")
 end
 
---------------------------------------------------
--- Drawing Setup
---------------------------------------------------
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Thickness = 1.5
 FOVCircle.Filled = false
 FOVCircle.NumSides = 60
 FOVCircle.Visible = false
 
-local CrosshairH = Drawing.new("Line")
-CrosshairH.Thickness = 1.5
-CrosshairH.Color = Color3.fromRGB(0, 255, 0)
-CrosshairH.Visible = false
-
-local CrosshairV = Drawing.new("Line")
-CrosshairV.Thickness = 1.5
-CrosshairV.Color = Color3.fromRGB(0, 255, 0)
-CrosshairV.Visible = false
-
---------------------------------------------------
--- Cleanup Logic
---------------------------------------------------
 local function clearHighlight(char)
     if HIGHLIGHT_CACHE[char] then
         pcall(function() HIGHLIGHT_CACHE[char]:Destroy() end)
         HIGHLIGHT_CACHE[char] = nil
-    end
-end
-
-local function clearChams(char)
-    if CHAMS_CACHE[char] then
-        for _, part in ipairs(CHAMS_CACHE[char]) do
-            pcall(function() part:Destroy() end)
-        end
-        CHAMS_CACHE[char] = nil
     end
 end
 
@@ -320,13 +287,9 @@ local function clearESP(char)
         ESP_CACHE[char] = nil
     end
     clearHighlight(char)
-    clearChams(char)
     clearTracer(char)
 end
 
---------------------------------------------------
--- Target Acquisition
---------------------------------------------------
 local function getTarget()
     if Settings.StickyTarget and LockedTarget and isCharValid(LockedTarget.Parent) then
         local hum = LockedTarget.Parent:FindFirstChildOfClass("Humanoid")
@@ -393,143 +356,96 @@ if RawMeta and setreadonly then
 end
 
 --------------------------------------------------
--- ESP & Rainbow Render Loops
---------------------------------------------------
-local function RenderESP()
-    for _, p in ipairs(Players:GetPlayers()) do
-        local char = p.Character
-        if p ~= LocalPlayer and isCharValid(char) and isAlive(char) and not isTeammate(p) then
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            local head = char:FindFirstChild("Head")
-            local hum = char:FindFirstChildOfClass("Humanoid")
-
-            if hrp and head and hum then
-                local dist = (Camera.CFrame.Position - hrp.Position).Magnitude
-                if dist <= Settings.MaxDistance then
-                    local hrpPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
-                    
-                    if onScreen then
-                        if not ESP_CACHE[char] then
-                            ESP_CACHE[char] = {
-                                Text = Drawing.new("Text"),
-                                Box = Drawing.new("Square"),
-                                HealthBg = Drawing.new("Square"),
-                                HealthMain = Drawing.new("Square")
-                            }
-                            ESP_CACHE[char].Text.Center = true
-                            ESP_CACHE[char].Text.Outline = true
-                            ESP_CACHE[char].Text.Size = 13
-                            ESP_CACHE[char].Text.Font = 2
-                            ESP_CACHE[char].Box.Thickness = 1
-                            ESP_CACHE[char].Box.Filled = false
-                            ESP_CACHE[char].HealthBg.Thickness = 1
-                            ESP_CACHE[char].HealthBg.Filled = true
-                            ESP_CACHE[char].HealthBg.Color = Color3.fromRGB(0,0,0)
-                            ESP_CACHE[char].HealthMain.Thickness = 1
-                            ESP_CACHE[char].HealthMain.Filled = true
-                        end
-
-                        local cache = ESP_CACHE[char]
-                        local headPos = Camera:WorldToViewportPoint(head.Position + Vector3.new(0, 0.5, 0))
-                        local legPos = Camera:WorldToViewportPoint(hrp.Position - Vector3.new(0, 3, 0))
-                        local height = math.abs(headPos.Y - legPos.Y)
-                        local width = height / 1.8
-
-                        if Settings.ESP_Name then
-                            cache.Text.Text = string.format("%s [%dm]", p.Name, math.floor(dist))
-                            cache.Text.Position = Vector2.new(hrpPos.X, headPos.Y - 18)
-                            cache.Text.Color = (CurrentTarget and CurrentTarget:IsDescendantOf(char)) and Color3.fromRGB(255, 50, 50) or Color3.fromRGB(255, 255, 255)
-                            cache.Text.Visible = true
-                        else
-                            cache.Text.Visible = false
-                        end
-
-                        if Settings.ESP_Box then
-                            cache.Box.Size = Vector2.new(width, height)
-                            cache.Box.Position = Vector2.new(hrpPos.X - width / 2, headPos.Y)
-                            cache.Box.Color = Color3.fromRGB(255, 255, 255)
-                            cache.Box.Visible = true
-                        else
-                            cache.Box.Visible = false
-                        end
-
-                        if Settings.ESP_Health then
-                            local healthPct = math.clamp(hum.Health / hum.MaxHealth, 0, 1)
-                            local barHeight = height * healthPct
-                            cache.HealthBg.Size = Vector2.new(3, height)
-                            cache.HealthBg.Position = Vector2.new((hrpPos.X - width / 2) - 6, headPos.Y)
-                            cache.HealthBg.Visible = true
-
-                            cache.HealthMain.Size = Vector2.new(1, barHeight)
-                            cache.HealthMain.Position = Vector2.new((hrpPos.X - width / 2) - 5, headPos.Y + (height - barHeight))
-                            cache.HealthMain.Color = Color3.fromRGB(255, 0, 0):Lerp(Color3.fromRGB(0, 255, 0), healthPct)
-                            cache.HealthMain.Visible = true
-                        else
-                            cache.HealthBg.Visible = false
-                            cache.HealthMain.Visible = false
-                        end
-
-                        if Settings.ESP_Tracers then
-                            if not TRACER_CACHE[char] then
-                                TRACER_CACHE[char] = Drawing.new("Line")
-                                TRACER_CACHE[char].Thickness = 1
-                            end
-                            TRACER_CACHE[char].From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
-                            TRACER_CACHE[char].To = Vector2.new(hrpPos.X, hrpPos.Y)
-                            TRACER_CACHE[char].Color = Settings.TracersColor
-                            TRACER_CACHE[char].Visible = true
-                        else
-                            clearTracer(char)
-                        end
-                    else
-                        if ESP_CACHE[char] then clearESP(char) end
-                    end
-                else
-                    if ESP_CACHE[char] then clearESP(char) end
-                end
-            end
-        else
-            if char then clearESP(char) end
-        end
-    end
-end
-
-local function RenderRainbowESP()
-    if not Settings.ESP_RainbowHighlight then
-        for char, _ in pairs(HIGHLIGHT_CACHE) do clearHighlight(char) end
-    else
-        for _, p in ipairs(Players:GetPlayers()) do
-            local char = p.Character
-            if p ~= LocalPlayer and isCharValid(char) and isAlive(char) and not isTeammate(p) then
-                local hrp = char:FindFirstChild("HumanoidRootPart")
-                if hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= Settings.MaxDistance then
-                    if not HIGHLIGHT_CACHE[char] then
-                        local h = Instance.new("Highlight")
-                        h.Adornee = char
-                        h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                        h.FillTransparency = 1
-                        h.OutlineTransparency = 0
-                        h.Parent = char
-                        HIGHLIGHT_CACHE[char] = h
-                    end
-                    HIGHLIGHT_CACHE[char].OutlineColor = rainbowColor(0.5)
-                else
-                    clearHighlight(char)
-                end
-            else
-                if char then clearHighlight(char) end
-            end
-        end
-    end
-end
-
---------------------------------------------------
--- Main Render Loop & Utilities
+-- Render Loop & Movement
 --------------------------------------------------
 RunService.RenderStepped:Connect(function()
     CurrentTarget = getTarget()
 
-    -- FOV Circle
     FOVCircle.Visible = Settings.ShowFOV
     FOVCircle.Radius = Settings.FOV
-    FOV
+    FOVCircle.Position = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    FOVCircle.Color = Settings.RainbowFOV and rainbowColor(0.5) or Settings.FOVColor
+
+    if Settings.CameraLock and CurrentTarget then
+        local targetCFrame = CFrame.new(Camera.CFrame.Position, CurrentTarget.Position)
+        Camera.CFrame = Settings.SmoothLock and Camera.CFrame:Lerp(targetCFrame, Settings.Smoothness) or targetCFrame
+    end
+
+    local char = LocalPlayer.Character
+    if isCharValid(char) then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            if Settings.SpeedHack then hum.WalkSpeed = Settings.WalkSpeedValue end
+            if Settings.JumpHack then hum.JumpPower = Settings.JumpPowerValue end
+        end
+
+        local hrp = char:FindFirstChild("HumanoidRootPart")
+        if Settings.Spinbot and hrp then
+            hrp.CFrame = hrp.CFrame * CFrame.Angles(0, math.rad(Settings.SpinSpeed), 0)
+        end
+
+        local head = char:FindFirstChild("Head")
+        if head then
+            if Settings.BigHead then
+                if not OriginalHeadSizes[head] then OriginalHeadSizes[head] = head.Size end
+                head.Size = Vector3.new(Settings.HeadSize, Settings.HeadSize, Settings.HeadSize)
+            elseif OriginalHeadSizes[head] then
+                head.Size = OriginalHeadSizes[head]
+                OriginalHeadSizes[head] = nil
+            end
+        end
+    end
+end)
+
+UserInputService.JumpRequest:Connect(function()
+    if Settings.InfiniteJump and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
+    end
+end)
+
+LocalPlayer.Idled:Connect(function()
+    if Settings.AntiAFK then
+        VirtualUser:CaptureController()
+        VirtualUser:ClickButton2(Vector2.new())
+    end
+end)
+
+--------------------------------------------------
+-- Build UI Window (WindUI)
+--------------------------------------------------
+local Window = WindUI:CreateWindow({
+    Title = "WindUI | Ultimate Suite",
+    Folder = "WindUI_Suite",
+    Size = UDim2.fromOffset(580, 460),
+    Transparent = true,
+    Theme = "Dark"
+})
+
+local CombatTab = Window:Tab({ Title = "Combat", Icon = "crosshair" })
+CombatTab:Toggle({ Title = "Silent Aim", Default = Settings.SilentAim, Callback = function(v) Settings.SilentAim = v end })
+CombatTab:Toggle({ Title = "Camera Lock", Default = Settings.CameraLock, Callback = function(v) Settings.CameraLock = v end })
+CombatTab:Toggle({ Title = "Smooth Lock", Default = Settings.SmoothLock, Callback = function(v) Settings.SmoothLock = v end })
+CombatTab:Slider({ Title = "Smoothness", Min = 0.05, Max = 1, Default = Settings.Smoothness, Callback = function(v) Settings.Smoothness = v end })
+CombatTab:Dropdown({ Title = "Target Part", Values = {"Head", "HumanoidRootPart", "UpperTorso", "Random"}, Default = "Head", Callback = function(v) Settings.TargetPart = v end })
+CombatTab:Toggle({ Title = "Wall Check", Default = Settings.WallCheck, Callback = function(v) Settings.WallCheck = v end })
+CombatTab:Toggle({ Title = "Team Check", Default = Settings.TeamCheck, Callback = function(v) Settings.TeamCheck = v end })
+
+local VisualsTab = Window:Tab({ Title = "Visuals", Icon = "eye" })
+VisualsTab:Toggle({ Title = "Show FOV Circle", Default = Settings.ShowFOV, Callback = function(v) Settings.ShowFOV = v end })
+VisualsTab:Slider({ Title = "FOV Size", Min = 30, Max = 800, Default = Settings.FOV, Callback = function(v) Settings.FOV = v end })
+
+local MiscTab = Window:Tab({ Title = "Movement & Troll", Icon = "user" })
+MiscTab:Toggle({ Title = "Physics Boobs (Jiggle)", Default = Settings.BoobFeature, Callback = function(v)
+    Settings.BoobFeature = v
+    if v then applyBoobs() else removeBoobs() end
+end })
+MiscTab:Toggle({ Title = "Speed Hack", Default = Settings.SpeedHack, Callback = function(v) Settings.SpeedHack = v end })
+MiscTab:Slider({ Title = "WalkSpeed", Min = 16, Max = 250, Default = Settings.WalkSpeedValue, Callback = function(v) Settings.WalkSpeedValue = v end })
+MiscTab:Toggle({ Title = "Jump Hack", Default = Settings.JumpHack, Callback = function(v) Settings.JumpHack = v end })
+MiscTab:Slider({ Title = "Jump Power", Min = 50, Max = 300, Default = Settings.JumpPowerValue, Callback = function(v) Settings.JumpPowerValue = v end })
+MiscTab:Toggle({ Title = "Infinite Jump", Default = Settings.InfiniteJump, Callback = function(v) Settings.InfiniteJump = v end })
+MiscTab:Toggle({ Title = "Spinbot", Default = Settings.Spinbot, Callback = function(v) Settings.Spinbot = v end })
+MiscTab:Toggle({ Title = "Big Head", Default = Settings.BigHead, Callback = function(v) Settings.BigHead = v end })
+
+WindUI:Notify({ Title = "Loaded!", Content = "สคริปต์พร้อมใช้งานแล้ว", Duration = 3 })
