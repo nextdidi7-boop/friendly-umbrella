@@ -1,6 +1,10 @@
 --[[ 
-    [PART 1/2] WindUI | SILENT AIM + ESP + CORE SYSTEM
-    ONE FILE SPLIT | AUTO CLEAN
+    WindUI | SILENT AIM + ESP (AIM COLOR)
+    + RAINBOW OUTLINE ESP (IMAGE STYLE)
+    + CAMERA LOCK MODE (NO BULLET REDIRECT)
+    AUTO HYBRID HEAD LOCK
+    ONE FILE FINAL | AUTO CLEAN
+    + UTILITY & BOOST EXTENSIONS
 ]]
 
 --------------------------------------------------
@@ -276,9 +280,7 @@ end
 local function cameraLookAt(part)
     if not part then return end
     Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
-een--[[ 
-    [PART 2/2] EXTENSION FUNCTIONS & UI SETUP
-]]
+end
 
 --------------------------------------------------
 -- NEW FEATURE LOGIC
@@ -511,4 +513,3 @@ local ServerTab = Window:Tab({Title="Server & Misc"})
 ServerTab:Button({Title="🌐 เข้าร่วม Server คนน้อย (Rejoin Low Players)", Callback=function()
     joinLowPlayerServer()
 end})
-d
