@@ -55,10 +55,6 @@ local HIGHLIGHT_CACHE = {}
 local WalkSpeedVal = 16
 local WalkSpeedEnabled = false
 
-local FlyEnabled = false
-local FlySpeed = 50
-local FlyBodyVel, FlyBodyGyro
-
 local InfiniteJumpEnabled = false
 
 local BrightnessVal = 1
@@ -283,7 +279,7 @@ local function cameraLookAt(part)
 end
 
 --------------------------------------------------
--- NEW FEATURE LOGIC (FIXED)
+-- NEW FEATURE LOGIC
 --------------------------------------------------
 -- Infinite Jump
 UserInputService.JumpRequest:Connect(function()
@@ -295,59 +291,7 @@ UserInputService.JumpRequest:Connect(function()
     end
 end)
 
--- Fly Logic (Fixed Render Loop Destroy Bug)
-local function stopFly()
-    if FlyBodyVel then FlyBodyVel:Destroy() FlyBodyVel = nil end
-    if FlyBodyGyro then FlyBodyGyro:Destroy() FlyBodyGyro = nil end
-    if LocalPlayer.Character then
-        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if hum then hum.PlatformStand = false end
-    end
-end
-
-local function updateFly()
-    local char = LocalPlayer.Character
-    if not char then 
-        stopFly()
-        return 
-    end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hrp or not hum then return end
-
-    if FlyEnabled then
-        hum.PlatformStand = true
-
-        if not FlyBodyVel or FlyBodyVel.Parent ~= hrp then
-            FlyBodyVel = Instance.new("BodyVelocity")
-            FlyBodyVel.MaxForce = Vector3.new(1e9, 1e9, 1e9)
-            FlyBodyVel.Parent = hrp
-        end
-
-        if not FlyBodyGyro or FlyBodyGyro.Parent ~= hrp then
-            FlyBodyGyro = Instance.new("BodyGyro")
-            FlyBodyGyro.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
-            FlyBodyGyro.P = 9e4
-            FlyBodyGyro.Parent = hrp
-        end
-
-        FlyBodyGyro.CFrame = Camera.CFrame
-        local moveDir = Vector3.zero
-
-        if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + Camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - Camera.CFrame.LookVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - Camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + Camera.CFrame.RightVector end
-        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
-        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
-
-        FlyBodyVel.Velocity = moveDir * FlySpeed
-    else
-        stopFly()
-    end
-end
-
--- NPC ESP (Fixed Leak)
+-- NPC ESP
 local function NPC_ESP_SYSTEM()
     if not ESP_NPC_ENABLED then
         for model, textObj in pairs(NPC_CACHE) do
@@ -401,7 +345,7 @@ local function joinLowPlayerServer()
 end
 
 --------------------------------------------------
--- RENDER LOOP (Original + Fixed Extensions)
+-- RENDER LOOP (Original + New Extensions)
 --------------------------------------------------
 RunService.RenderStepped:Connect(function()
     local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
@@ -438,7 +382,7 @@ RunService.RenderStepped:Connect(function()
         if not isCharValid(char) then clearHighlight(char) end
     end
 
-    -- New Loop Mechanics (Fixed Logic)
+    -- New Loop Mechanics
     if WalkSpeedEnabled and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
         if hum then hum.WalkSpeed = WalkSpeedVal end
@@ -449,7 +393,6 @@ RunService.RenderStepped:Connect(function()
         Lighting.ClockTime = 12
     end
 
-    updateFly()
     NPC_ESP_SYSTEM()
 end)
 
@@ -488,12 +431,6 @@ PlayerTab:Toggle({Title="เปิดใช้งานการวิ่งเ�
     end
 end})
 PlayerTab:Slider({Title="ปรับความเร็วการวิ่ง", Value={Min=16, Max=250, Default=WalkSpeedVal}, Callback=function(v) WalkSpeedVal = v end})
-
-PlayerTab:Toggle({Title="ระบบบิน (Fly Mode)", Callback=function(v) 
-    FlyEnabled = v 
-    if not v then stopFly() end
-end})
-PlayerTab:Slider({Title="ความเร็วการบิน", Value={Min=10, Max=300, Default=FlySpeed}, Callback=function(v) FlySpeed = v end})
 
 PlayerTab:Toggle({Title="กระโดดไม่จำกัด (Infinite Jump)", Callback=function(v) InfiniteJumpEnabled = v end})
 
