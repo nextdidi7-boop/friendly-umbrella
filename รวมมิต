@@ -1,0 +1,514 @@
+--[[ 
+    [PART 1/2] WindUI | SILENT AIM + ESP + CORE SYSTEM
+    ONE FILE SPLIT | AUTO CLEAN
+]]
+
+--------------------------------------------------
+-- Load WindUI
+--------------------------------------------------
+local WindUI
+do
+    local ok, result = pcall(function()
+        return require("./src/Init")
+    end)
+    WindUI = ok and result or loadstring(game:HttpGet(
+        "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"
+    ))()
+end
+
+--------------------------------------------------
+-- Services
+--------------------------------------------------
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+--------------------------------------------------
+-- States (Original)
+--------------------------------------------------
+local SilentAim   = false
+local CAMERA_LOCK = false
+local ESP_ENABLED = false
+local RAINBOW_ESP = false
+
+local TeamCheck  = true
+local MaxDistance = 600
+local FOV = 120
+
+local CurrentTarget = nil
+local ESP_CACHE = {}
+local HIGHLIGHT_CACHE = {}
+
+--------------------------------------------------
+-- States (New Features)
+--------------------------------------------------
+local WalkSpeedVal = 16
+local WalkSpeedEnabled = false
+
+local FlyEnabled = false
+local FlySpeed = 50
+local FlyBodyVel, FlyBodyGyro
+
+local InfiniteJumpEnabled = false
+
+local BrightnessVal = 1
+local FullbrightEnabled = false
+local OriginalBrightness = Lighting.Brightness
+local OriginalClockTime = Lighting.ClockTime
+
+local ESP_NPC_ENABLED = false
+local NPC_CACHE = {}
+
+--------------------------------------------------
+-- Utility (Original)
+--------------------------------------------------
+local function isAlive(char)
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    return hum and hum.Health > 0
+end
+
+local function isTeammate(p)
+    if not TeamCheck then return false end
+    if not LocalPlayer.Team or not p.Team then return false end
+    return p.Team == LocalPlayer.Team
+end
+
+local function rainbowColor(speed)
+    local t = tick() * speed
+    return Color3.fromHSV(t % 1, 1, 1)
+end
+
+local function isCharValid(char)
+    return char and char.Parent and char:IsDescendantOf(workspace)
+end
+
+--------------------------------------------------
+-- Visibility (Original)
+--------------------------------------------------
+local RayParams = RaycastParams.new()
+RayParams.FilterType = Enum.RaycastFilterType.Blacklist
+RayParams.IgnoreWater = true
+
+local function isVisible(part, char)
+    RayParams.FilterDescendantsInstances = {LocalPlayer.Character, char}
+    local origin = Camera.CFrame.Position
+    local dir = part.Position - origin
+    return not workspace:Raycast(origin, dir, RayParams)
+end
+
+--------------------------------------------------
+-- Drawing (Original)
+--------------------------------------------------
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 2
+FOVCircle.Filled = false
+FOVCircle.Color = Color3.fromRGB(255,255,0)
+
+local AimLine = Drawing.new("Line")
+AimLine.Thickness = 2
+AimLine.Color = Color3.fromRGB(255,0,0)
+
+--------------------------------------------------
+-- CLEAN (Original)
+--------------------------------------------------
+local function clearHighlight(char)
+    if HIGHLIGHT_CACHE[char] then
+        pcall(function()
+            HIGHLIGHT_CACHE[char]:Destroy()
+        end)
+        HIGHLIGHT_CACHE[char] = nil
+    end
+end
+
+local function clearESP(char)
+    local cache = ESP_CACHE[char]
+    if cache then
+        pcall(function()
+            if cache.Text then
+                cache.Text.Visible = false
+                cache.Text:Remove()
+            end
+        end)
+        ESP_CACHE[char] = nil
+    end
+    clearHighlight(char)
+end
+
+--------------------------------------------------
+-- ESP TEXT (Original)
+--------------------------------------------------
+local function ESP_SYSTEM()
+    if not ESP_ENABLED then
+        for char,_ in pairs(ESP_CACHE) do
+            clearESP(char)
+        end
+        return
+    end
+
+    for _,p in ipairs(Players:GetPlayers()) do
+        local char = p.Character
+        if p ~= LocalPlayer
+        and char
+        and isCharValid(char)
+        and isAlive(char)
+        and not isTeammate(p) then
+
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if not hrp then clearESP(char) continue end
+
+            local dist = (Camera.CFrame.Position - hrp.Position).Magnitude
+            if dist > MaxDistance then
+                if ESP_CACHE[char] then ESP_CACHE[char].Text.Visible = false end
+                continue
+            end
+
+            if not ESP_CACHE[char] then
+                local t = Drawing.new("Text")
+                t.Center = true
+                t.Outline = true
+                t.Font = 2
+                t.Size = 14
+                ESP_CACHE[char] = {Text = t}
+            end
+
+            local txt = ESP_CACHE[char].Text
+            local pos, on = Camera:WorldToViewportPoint(hrp.Position)
+            if on then
+                txt.Text = p.Name.." ["..math.floor(dist).."m]"
+                txt.Position = Vector2.new(pos.X, pos.Y - 28)
+                txt.Color = (CurrentTarget and CurrentTarget:IsDescendantOf(char))
+                    and Color3.fromRGB(255,60,60)
+                    or Color3.fromRGB(255,255,255)
+                txt.Visible = true
+            else
+                txt.Visible = false
+            end
+        else
+            if char then clearESP(char) end
+        end
+    end
+end
+
+--------------------------------------------------
+-- RAINBOW OUTLINE ESP (Original)
+--------------------------------------------------
+local function RAINBOW_ESP_SYSTEM()
+    if not RAINBOW_ESP then
+        for char,_ in pairs(HIGHLIGHT_CACHE) do
+            clearHighlight(char)
+        end
+        return
+    end
+
+    for _,p in ipairs(Players:GetPlayers()) do
+        local char = p.Character
+        if p ~= LocalPlayer
+        and char
+        and isCharValid(char)
+        and isAlive(char)
+        and not isTeammate(p) then
+
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if not hrp or (Camera.CFrame.Position - hrp.Position).Magnitude > MaxDistance then
+                clearHighlight(char)
+                continue
+            end
+
+            if not HIGHLIGHT_CACHE[char] then
+                local h = Instance.new("Highlight")
+                h.Adornee = char
+                h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                h.FillTransparency = 1
+                h.OutlineTransparency = 0
+                h.Parent = workspace
+                HIGHLIGHT_CACHE[char] = h
+            end
+
+            HIGHLIGHT_CACHE[char].OutlineColor = rainbowColor(0.25)
+        else
+            if char then clearHighlight(char) end
+        end
+    end
+end
+
+--------------------------------------------------
+-- TARGET (Original)
+--------------------------------------------------
+local function getTarget()
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    local closest, target = math.huge, nil
+
+    for _,p in ipairs(Players:GetPlayers()) do
+        local char = p.Character
+        if p ~= LocalPlayer
+        and char
+        and isAlive(char)
+        and not isTeammate(p) then
+
+            local head = char:FindFirstChild("Head")
+            local hrp  = char:FindFirstChild("HumanoidRootPart")
+            if head and hrp
+            and (Camera.CFrame.Position - hrp.Position).Magnitude <= MaxDistance
+            and isVisible(head, char) then
+
+                local s,on = Camera:WorldToViewportPoint(head.Position)
+                if on then
+                    local d = (Vector2.new(s.X,s.Y) - center).Magnitude
+                    if d < FOV and d < closest then
+                        closest, target = d, head
+                    end
+                end
+            end
+        end
+    end
+    return target
+end
+
+--------------------------------------------------
+-- CAMERA LOCK (Original)
+--------------------------------------------------
+local function cameraLookAt(part)
+    if not part then return end
+    Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
+een--[[ 
+    [PART 2/2] EXTENSION FUNCTIONS & UI SETUP
+]]
+
+--------------------------------------------------
+-- NEW FEATURE LOGIC
+--------------------------------------------------
+-- Infinite Jump
+UserInputService.JumpRequest:Connect(function()
+    if InfiniteJumpEnabled and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum:ChangeState(Enum.HumanoidStateType.Jumping)
+        end
+    end
+end)
+
+-- Fly Logic
+local function updateFly()
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    if not hrp then return end
+
+    if FlyEnabled then
+        if not FlyBodyVel then
+            FlyBodyVel = Instance.new("BodyVelocity")
+            FlyBodyVel.MaxForce = Vector3.new(1e9, 1e9, 1e9)
+            FlyBodyVel.Parent = hrp
+        end
+        if not FlyBodyGyro then
+            FlyBodyGyro = Instance.new("BodyGyro")
+            FlyBodyGyro.MaxTorque = Vector3.new(1e9, 1e9, 1e9)
+            FlyBodyGyro.P = 9e4
+            FlyBodyGyro.Parent = hrp
+        end
+
+        FlyBodyGyro.CFrame = Camera.CFrame
+        local moveDir = Vector3.new()
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - Camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + Camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+
+        FlyBodyVel.Velocity = moveDir * FlySpeed
+    else
+        if FlyBodyVel then FlyBodyVel:Destroy() FlyBodyVel = nil end
+        if FlyBodyGyro then FlyBodyGyro:Destroy() FlyBodyGyro = nil end
+    end
+end
+
+-- NPC ESP
+local function NPC_ESP_SYSTEM()
+    if not ESP_NPC_ENABLED then
+        for model, textObj in pairs(NPC_CACHE) do
+            pcall(function() textObj:Remove() end)
+        end
+        NPC_CACHE = {}
+        return
+    end
+
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") and not Players:GetPlayerFromCharacter(obj) then
+            local hrp = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Head")
+            if hrp then
+                if not NPC_CACHE[obj] then
+                    local t = Drawing.new("Text")
+                    t.Center = true
+                    t.Outline = true
+                    t.Font = 2
+                    t.Size = 13
+                    t.Color = Color3.fromRGB(0, 255, 150)
+                    NPC_CACHE[obj] = t
+                end
+
+                local pos, on = Camera:WorldToViewportPoint(hrp.Position)
+                if on then
+                    NPC_CACHE[obj].Text = "[NPC] " .. obj.Name
+                    NPC_CACHE[obj].Position = Vector2.new(pos.X, pos.Y - 20)
+                    NPC_CACHE[obj].Visible = true
+                else
+                    NPC_CACHE[obj].Visible = false
+                end
+            end
+        end
+    end
+end
+
+-- Server Hop (Low Player Count)
+local function joinLowPlayerServer()
+    local api = "https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?sortOrder=Asc&limit=100"
+    local success, result = pcall(function()
+        return HttpService:JSONDecode(game:HttpGet(api))
+    end)
+    if success and result and result.data then
+        for _, server in ipairs(result.data) do
+            if server.playing < server.maxPlayers and server.id ~= game.JobId then
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, server.id, LocalPlayer)
+                break
+            end
+        end
+    end
+end
+
+--------------------------------------------------
+-- RENDER LOOP (Original + New Extensions)
+--------------------------------------------------
+RunService.RenderStepped:Connect(function()
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+
+    FOVCircle.Position = center
+    FOVCircle.Radius = FOV
+    FOVCircle.Visible = SilentAim or CAMERA_LOCK
+
+    AimLine.Visible = false
+    CurrentTarget = nil
+
+    if SilentAim or CAMERA_LOCK then
+        CurrentTarget = getTarget()
+    end
+
+    if CAMERA_LOCK and CurrentTarget then
+        cameraLookAt(CurrentTarget)
+    end
+
+    if SilentAim and not CAMERA_LOCK and CurrentTarget then
+        local p = Camera:WorldToViewportPoint(CurrentTarget.Position)
+        AimLine.From = center
+        AimLine.To = Vector2.new(p.X,p.Y)
+        AimLine.Visible = true
+    end
+
+    ESP_SYSTEM()
+    RAINBOW_ESP_SYSTEM()
+
+    for char,_ in pairs(ESP_CACHE) do
+        if not isCharValid(char) then clearESP(char) end
+    end
+    for char,_ in pairs(HIGHLIGHT_CACHE) do
+        if not isCharValid(char) then clearHighlight(char) end
+    end
+
+    -- New Loop Mechanics
+    if WalkSpeedEnabled and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = WalkSpeedVal end
+    end
+
+    if FullbrightEnabled then
+        Lighting.Brightness = BrightnessVal
+        Lighting.ClockTime = 12
+    end
+
+    updateFly()
+    NPC_ESP_SYSTEM()
+end)
+
+--------------------------------------------------
+-- UI SETUP
+--------------------------------------------------
+local Window = WindUI:CreateWindow({
+    Title="Thug Hunters💢👿",
+    Folder="WindHub",
+    OpenButton={Title="Thug Hunters💢👿",Enabled=true}
+})
+
+--------------------------------------------------
+-- TAB 1: ORIGINAL MENU (UNTOUCHED)
+--------------------------------------------------
+local Main = Window:Tab({Title="เมนู(กด)"})
+
+Main:Toggle({Title="🔫ล็อค(บังคับกระสุน)", Callback=function(v) SilentAim=v end})
+Main:Toggle({Title="🔫ล็อค(หันจอไปหัว)", Callback=function(v) CAMERA_LOCK=v end})
+Main:Toggle({Title="👑ESP(ชื่อ)", Callback=function(v) ESP_ENABLED=v end})
+Main:Toggle({Title="👹ESP(กรอบสีรุ้ง)", Callback=function(v) RAINBOW_ESP=v end})
+Main:Toggle({Title="Team Check", Default=true, Callback=function(v) TeamCheck=v end})
+Main:Slider({Title="👹FOV", Value={Min=40,Max=4000,Default=FOV}, Callback=function(v) FOV=v end})
+Main:Slider({Title="👹ระยะ", Value={Min=100,Max=12000,Default=MaxDistance}, Callback=function(v) MaxDistance=v end})
+
+--------------------------------------------------
+-- TAB 2: PLAYER OPTIONS (NEW)
+--------------------------------------------------
+local PlayerTab = Window:Tab({Title="Player Options"})
+
+PlayerTab:Toggle({Title="เปิดใช้งานการวิ่งเร็ว", Callback=function(v) 
+    WalkSpeedEnabled = v 
+    if not v and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = 16 end
+    end
+end})
+PlayerTab:Slider({Title="ปรับความเร็วการวิ่ง", Value={Min=16, Max=250, Default=WalkSpeedVal}, Callback=function(v) WalkSpeedVal = v end})
+
+PlayerTab:Toggle({Title="ระบบบิน (Fly Mode)", Callback=function(v) FlyEnabled = v end})
+PlayerTab:Slider({Title="ความเร็วการบิน", Value={Min=10, Max=300, Default=FlySpeed}, Callback=function(v) FlySpeed = v end})
+
+PlayerTab:Toggle({Title="กระโดดไม่จำกัด (Infinite Jump)", Callback=function(v) InfiniteJumpEnabled = v end})
+
+--------------------------------------------------
+-- TAB 3: VISUAL & WORLD (NEW)
+--------------------------------------------------
+local VisualTab = Window:Tab({Title="Visual & World"})
+
+VisualTab:Toggle({Title="เปิดความสว่างแมพ (Fullbright)", Callback=function(v) 
+    FullbrightEnabled = v 
+    if not v then
+        Lighting.Brightness = OriginalBrightness
+        Lighting.ClockTime = OriginalClockTime
+    end
+end})
+VisualTab:Slider({Title="ระดับความสว่าง", Value={Min=1, Max=10, Default=BrightnessVal}, Callback=function(v) BrightnessVal = v end})
+
+VisualTab:Toggle({Title="ESP มองเห็น NPC", Callback=function(v) ESP_NPC_ENABLED = v end})
+
+VisualTab:Button({Title="🚀 อัปเดต FPS (Optimize/Boost FPS)", Callback=function()
+    for _, item in ipairs(workspace:GetDescendants()) do
+        if item:IsA("BasePart") then
+            item.Material = Enum.Material.SmoothPlastic
+        elseif item:IsA("Decal") or item:IsA("Texture") then
+            item:Destroy()
+        end
+    end
+    Lighting.GlobalShadows = false
+end})
+
+--------------------------------------------------
+-- TAB 4: SERVER & MISC (NEW)
+--------------------------------------------------
+local ServerTab = Window:Tab({Title="Server & Misc"})
+
+ServerTab:Button({Title="🌐 เข้าร่วม Server คนน้อย (Rejoin Low Players)", Callback=function()
+    joinLowPlayerServer()
+end})
+d
