@@ -1,10 +1,14 @@
 --[[ 
     WindUI | ULTIMATE COMBAT, ESP, MOVEMENT & TROLL SUITE (PHYSICS BOOBS UPDATE)
-    Features: Silent Aim, Camera Lock, Smooth Lock, Sticky Target, Triggerbot,
-              Advanced ESP (Name, Box, Health, Rainbow, Tracers, Chams), 
-              Movement (Speed, Jump, Noclip, Fly, InfJump), Big Head, Spinbot, Custom Crosshair, Anti-AFK,
-              REALISTIC JIGGLE PHYSICS BOOBS (Pink Nipples + Movement Spring Bounce)
+    Fixes & Optimized for Immediate Execution
 ]]
+
+--------------------------------------------------
+-- Helper Functions (Declared First to Prevent Nil Errors)
+--------------------------------------------------
+local function isCharValid(char)
+    return char and char.Parent and char:IsDescendantOf(workspace)
+end
 
 --------------------------------------------------
 -- Load WindUI
@@ -99,7 +103,7 @@ local TRACER_CACHE = {}
 local OriginalHeadSizes = {}
 
 --------------------------------------------------
--- Physics Spring Engine (สำหรับระบบหน้าอกเด้ง)
+-- Physics Spring Engine (ระบบหน้าอกเด้ง)
 --------------------------------------------------
 local Spring = {
     Position = Vector3.new(0,0,0),
@@ -166,37 +170,30 @@ local function applyBoobs()
     local skinColor = torso.Color
     if head then skinColor = head.Color end
 
-    -- สีชมพูธรรมชาติสำหรับปานนมและปลายหัวนม
     local pinkAreolaColor = Color3.fromRGB(255, 140, 160)
     local pinkNippleColor = Color3.fromRGB(255, 105, 135)
 
-    -- เต้านมซ้าย-ขวา
     local leftBreast, lW = createSphere(char, BaseLeftC0, Vector3.new(1.15, 1.15, 1.15), skinColor)
     local rightBreast, rW = createSphere(char, BaseRightC0, Vector3.new(1.15, 1.15, 1.15), skinColor)
     LeftWeld = lW
     RightWeld = rW
 
-    -- ปานนมสีชมพู (Areola)
     createSphere(char, CFrame.new(0, 0, -0.55), Vector3.new(0.4, 0.4, 0.1), pinkAreolaColor, leftBreast)
     createSphere(char, CFrame.new(0, 0, -0.55), Vector3.new(0.4, 0.4, 0.1), pinkAreolaColor, rightBreast)
 
-    -- ปลายหัวนมสีชมพูเข้ม (Nipple Tip)
     createSphere(char, CFrame.new(0, 0, -0.58), Vector3.new(0.18, 0.18, 0.12), pinkNippleColor, leftBreast)
     createSphere(char, CFrame.new(0, 0, -0.58), Vector3.new(0.18, 0.18, 0.12), pinkNippleColor, rightBreast)
 end
 
--- อัปเดตฟิสิกส์การเด้งในวงรอบ Render
 RunService.RenderStepped:Connect(function(dt)
     if Settings.BoobFeature and LocalPlayer.Character then
         local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
         if hrp and LeftWeld and RightWeld then
             local currentPos = hrp.Position
             if LastHRPPosition then
-                -- คำนวณความเร็วการเคลื่อนที่ตัวละคร
                 local velocity = (currentPos - LastHRPPosition) / dt
                 local localVel = hrp.CFrame:VectorToObjectSpace(velocity)
                 
-                -- ส่งแรงดึงกลับตรงข้ามทิศทางเคลื่อนที่ (แรงเฉื่อย)
                 Spring.Target = Vector3.new(
                     math.clamp(-localVel.X * 0.012, -0.25, 0.25),
                     math.clamp(-localVel.Y * 0.018, -0.35, 0.35),
@@ -205,10 +202,8 @@ RunService.RenderStepped:Connect(function(dt)
             end
             LastHRPPosition = currentPos
 
-            -- คำนวณ Spring Offset
             local offset = Spring:Update(dt, Settings.BoobBounceStiffness, Settings.BoobBounceDamping)
             
-            -- ปรับแต่งมุม CFrame เพื่อให้เด้งโยกตามแรง
             LeftWeld.C0 = BaseLeftC0 * CFrame.new(offset) * CFrame.Angles(offset.Y * 0.8, -offset.X * 0.8, 0)
             RightWeld.C0 = BaseRightC0 * CFrame.new(offset) * CFrame.Angles(offset.Y * 0.8, offset.X * 0.8, 0)
         end
@@ -240,10 +235,6 @@ local function rainbowColor(speed)
     return Color3.fromHSV((tick() * speed) % 1, 1, 1)
 end
 
-local function isCharValid(char)
-    return char and char.Parent and char:IsDescendantOf(Workspace)
-end
-
 local RayParams = RaycastParams.new()
 RayParams.FilterType = Enum.RaycastFilterType.Exclude
 RayParams.IgnoreWater = true
@@ -273,18 +264,13 @@ local function getChosenPart(char)
 end
 
 --------------------------------------------------
--- Drawing Setup (FOV, AimLine, Crosshair)
+-- Drawing Setup
 --------------------------------------------------
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Thickness = 1.5
 FOVCircle.Filled = false
 FOVCircle.NumSides = 60
 FOVCircle.Visible = false
-
-local AimLine = Drawing.new("Line")
-AimLine.Thickness = 1.5
-AimLine.Color = Color3.fromRGB(255, 50, 50)
-AimLine.Visible = false
 
 local CrosshairH = Drawing.new("Line")
 CrosshairH.Thickness = 1.5
@@ -407,7 +393,7 @@ if RawMeta and setreadonly then
 end
 
 --------------------------------------------------
--- ESP Rendering System
+-- ESP & Rainbow Render Loops
 --------------------------------------------------
 local function RenderESP()
     for _, p in ipairs(Players:GetPlayers()) do
@@ -523,4 +509,27 @@ local function RenderRainbowESP()
                         h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
                         h.FillTransparency = 1
                         h.OutlineTransparency = 0
-                  
+                        h.Parent = char
+                        HIGHLIGHT_CACHE[char] = h
+                    end
+                    HIGHLIGHT_CACHE[char].OutlineColor = rainbowColor(0.5)
+                else
+                    clearHighlight(char)
+                end
+            else
+                if char then clearHighlight(char) end
+            end
+        end
+    end
+end
+
+--------------------------------------------------
+-- Main Render Loop & Utilities
+--------------------------------------------------
+RunService.RenderStepped:Connect(function()
+    CurrentTarget = getTarget()
+
+    -- FOV Circle
+    FOVCircle.Visible = Settings.ShowFOV
+    FOVCircle.Radius = Settings.FOV
+    FOV
