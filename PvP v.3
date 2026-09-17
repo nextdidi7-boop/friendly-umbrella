@@ -1,0 +1,508 @@
+--[[ 
+    ==================================================
+    [PART 1/4] SERVICES, VARIABLES & REFACTORED GUN SYSTEM
+    ==================================================
+]]
+
+local WindUI
+do
+    local ok, result = pcall(function()
+        return require("./src/Init")
+    end)
+    WindUI = ok and result or loadstring(game:HttpGet(
+        "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"
+    ))()
+end
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
+local StarterGui = game:GetService("StarterGui")
+local Stats = game:GetService("Stats")
+local VirtualUser = game:GetService("VirtualUser")
+local TweenService = game:GetService("TweenService")
+
+local Camera = workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+-- Global States & Variables
+
+local SilentAim   = false
+local CAMERA_LOCK = false
+local ESP_ENABLED = false
+local RAINBOW_ESP = false
+
+local TeamCheck  = true
+local MaxDistance = 600
+local FOV = 120
+
+local CurrentTarget = nil
+local ESP_CACHE = {}
+local HIGHLIGHT_CACHE = {}
+
+local WalkSpeedVal = 16
+local WalkSpeedEnabled = false
+local InfiniteJumpEnabled = false
+local JumpPowerVal = 50
+local JumpPowerEnabled = false
+local AntiAFKEnabled = false
+
+local BrightnessVal = 1
+local FullbrightEnabled = false
+local OriginalBrightness = Lighting.Brightness
+local OriginalClockTime = Lighting.ClockTime
+
+local ESP_NPC_ENABLED = false
+local NPC_CACHE = {}
+
+local HitboxEnabled = false
+local HitboxSize = 10
+local BigHeadEnabled = false
+local BigHeadSize = 5
+local OriginalSizes = {}
+
+-- Combat & Gun Mods Variables (Bypass Server Mode)
+local FireRateVal = 0.1
+local AutoReturnFire = false
+local AutoShootEnabled = false
+local BurstTwoEnabled = false
+local GodModeEnabled = false
+
+local AutoReloadEnabled = false
+local ReloadSpeedVal = 0.2
+local IsReloading = false
+
+local LastShootTime = 0
+local IsShootingBurst = false
+
+-- NEW: extended feature states
+local NoRecoilEnabled = false
+local NoSpreadEnabled = false
+local InstantHitEnabled = false
+local AimOnKeyEnabled = false
+local AimKey = Enum.KeyCode.E
+
+local TP_FORWARD_DIST = 15
+local FlyEnabled = false
+local FlySpeed = 60
+local NoclipEnabled = false
+local AntiFlingEnabled = false
+local AutoParryEnabled = false
+
+local BoxESPEnabled = false
+local HealthESPEnabled = false
+local NameESPEnabled = false
+local DistanceESPEnabled = true
+local TracerEnabled = false
+local ChamsEnabled = false
+local ChamsColor = Color3.fromRGB(255, 0, 100)
+
+local HEADSHOT_ONLY = true
+local PREDICTION = 0.12
+local FOVCircleEnabled = true
+local FOVCircleColor = Color3.fromRGB(255, 255, 0)
+
+local ThirdPersonEnabled = false
+local ThirdPersonDist = 12
+
+local AutoBuyEnabled = false
+local AutoBuyItems = {}
+local ServerHopEnabled = false
+local HopMinPlayers = 0
+local HopMaxPlayers = 10
+
+local SpeedHackKeybind = Enum.KeyCode.LeftShift
+local SpeedHackMultiplier = 2.5
+local SpeedHackActive = false
+
+-- Core Helper Functions
+
+local function isAlive(char)
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    return hum and hum.Health > 0
+end
+
+local function isTeammate(p)
+    if not TeamCheck then return false end
+    if not LocalPlayer.Team or not p.Team then return false end
+    return p.Team == LocalPlayer.Team
+end
+
+local function rainbowColor(speed)
+    local t = tick() * speed
+    return Color3.fromHSV(t % 1, 1, 1)
+end
+
+local function isCharValid(char)
+    return char and char.Parent and char:IsDescendantOf(workspace)
+end
+
+local function getEquippedTool()
+    if LocalPlayer.Character then
+        return LocalPlayer.Character:FindFirstChildOfClass("Tool")
+    end
+    return nil
+end
+
+-- Valid Shot Trigger (Real Server Damage)
+local function fireGun()
+    if IsReloading then return end
+    local tool = getEquippedTool()
+    if tool then
+        tool:Activate()
+        task.wait(math.clamp(FireRateVal, 0.05, 1))
+        tool:Deactivate()
+    end
+end
+
+-- Server-Bypass Fast Reload (Equip-Refresh Trick)
+local function fastReload()
+    if IsReloading then return end
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local tool = getEquippedTool()
+
+    if hum and tool then
+        IsReloading = true
+        task.wait(ReloadSpeedVal)
+        hum:UnequipTools()
+        task.wait(0.05)
+        hum:EquipTool(tool)
+        IsReloading = false
+    end
+end
+
+-- Auto Reload Detector
+local function handleAutoReload()
+    if not AutoReloadEnabled or IsReloading then return end
+    local tool = getEquippedTool()
+    if tool then
+        for _, v in ipairs(tool:GetDescendants()) do
+            if v:IsA("IntValue") or v:IsA("NumberValue") then
+                local name = v.Name:lower()
+                if (name:find("ammo") or name:find("clip") or name:find("bullet")) and v.Value <= 0 then
+                    fastReload()
+                    break
+                end
+            end
+        end
+    end
+end
+
+-- NEW: strip recoil / spread objects on equipped tool
+local function applyNoRecoil(tool)
+    if not tool then return end
+    for _, v in ipairs(tool:GetDescendants()) do
+        if NoRecoilEnabled and v:IsA("NumberValue") and v.Name:lower():find("recoil") then
+            v.Value = 0
+        end
+        if NoSpreadEnabled and (v:IsA("NumberValue") or v:IsA("Vector3Value")) and v.Name:lower():find("spread") then
+            if v:IsA("NumberValue") then v.Value = 0
+            else v.Value = Vector3.new(0,0,0) end
+        end
+    end
+end
+
+-- Loop Updates
+RunService.Stepped:Connect(function()
+    if GodModeEnabled and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.Health = hum.MaxHealth end
+    end
+    handleAutoReload()
+    if NoRecoilEnabled or NoSpreadEnabled then
+        applyNoRecoil(getEquippedTool())
+    end
+end)
+--[[ 
+    ==================================================
+    [PART 2/4] VISUALS, HITBOX & TARGETING ENGINE
+    ==================================================
+]]
+
+-- Physics Soft-Body (Boob) System
+local BoobSettings = {
+    Enabled = false,
+    Stiffness = 12,
+    Damping = 0.15,
+    Size = 1.0
+}
+
+local CreatedBoobParts = {}
+local LeftMeshWeld, RightMeshWeld = nil, nil
+local BaseLeftC0 = CFrame.new(-0.42, 0.1, -0.52)
+local BaseRightC0 = CFrame.new(0.42, 0.1, -0.52)
+
+local PhysPos = Vector3.new(0,0,0)
+local PhysVel = Vector3.new(0,0,0)
+local LastHRPPos = nil
+
+local function DestroyBoobs()
+    for _, v in ipairs(CreatedBoobParts) do
+        if v and v.Parent then pcall(function() v:Destroy() end) end
+    end
+    CreatedBoobParts = {}
+    LeftMeshWeld, RightMeshWeld = nil, nil
+end
+
+local function BuildSoftBoob(char)
+    DestroyBoobs()
+    if not char or not char.Parent then return end
+
+    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    local head = char:FindFirstChild("Head")
+    if not torso then return end
+
+    local skinCol = head and head.Color or torso.Color
+    local pink1 = Color3.fromRGB(255, 130, 155)
+    local pink2 = Color3.fromRGB(255, 80, 120)
+    local s = BoobSettings.Size
+
+    local function createSphere(cf, size, col, parentWeld)
+        local p = Instance.new("Part")
+        p.Shape = Enum.PartType.Ball
+        p.Size = size
+        p.Color = col
+        p.Material = Enum.Material.SmoothPlastic
+        p.CanCollide = false
+        p.Massless = true
+        p.Parent = char
+
+        local w = Instance.new("Weld")
+        w.Part0 = parentWeld or torso
+        w.Part1 = p
+        w.C0 = cf
+        w.Parent = p
+
+        table.insert(CreatedBoobParts, p)
+        return p, w
+    end
+
+    local lMain, lW = createSphere(BaseLeftC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
+    local rMain, rW = createSphere(BaseRightC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
+    LeftMeshWeld = lW
+    RightMeshWeld = rW
+
+    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, lMain)
+    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, rMain)
+
+    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, lMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, rMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, lMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, rMain)
+end
+
+RunService.Heartbeat:Connect(function(dt)
+    if BoobSettings.Enabled and LocalPlayer.Character then
+        local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if hrp and LeftMeshWeld and RightMeshWeld then
+            local pos = hrp.Position
+            if LastHRPPos then
+                local delta = (pos - LastHRPPos)
+                local moveVel = hrp.CFrame:VectorToObjectSpace(delta / dt)
+
+                local targetOff = Vector3.new(
+                    math.clamp(-moveVel.X * 0.02, -0.4, 0.4),
+                    math.clamp(-moveVel.Y * 0.03, -0.5, 0.5),
+                    math.clamp(moveVel.Z * 0.02, -0.3, 0.3)
+                )
+
+                local force = (targetOff - PhysPos) * BoobSettings.Stiffness
+                PhysVel = (PhysVel + force * dt) * (1 - math.clamp(BoobSettings.Damping, 0, 1))
+                PhysPos = PhysPos + PhysVel * dt
+            end
+            LastHRPPos = pos
+
+            LeftMeshWeld.C0 = BaseLeftC0 * CFrame.new(PhysPos) * CFrame.Angles(PhysPos.Y * 0.9, -PhysPos.X * 0.8, PhysPos.X * 0.4)
+            RightMeshWeld.C0 = BaseRightC0 * CFrame.new(PhysPos) * CFrame.Angles(PhysPos.Y * 0.9, PhysPos.X * 0.8, -PhysPos.X * 0.4)
+        end
+    else
+        LastHRPPos = nil
+    end
+end)
+
+-- Raycasting & Target Detection
+local RayParams = RaycastParams.new()
+RayParams.FilterType = Enum.RaycastFilterType.Blacklist
+RayParams.IgnoreWater = true
+
+local function isVisible(part, char)
+    RayParams.FilterDescendantsInstances = {LocalPlayer.Character, char}
+    local origin = Camera.CFrame.Position
+    local dir = part.Position - origin
+    return not workspace:Raycast(origin, dir, RayParams)
+end
+
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 2
+FOVCircle.Filled = false
+FOVCircle.Color = Color3.fromRGB(255,255,0)
+
+local AimLine = Drawing.new("Line")
+AimLine.Thickness = 2
+AimLine.Color = Color3.fromRGB(255,0,0)
+
+local function clearHighlight(char)
+    if HIGHLIGHT_CACHE[char] then
+        pcall(function() HIGHLIGHT_CACHE[char]:Destroy() end)
+        HIGHLIGHT_CACHE[char] = nil
+    end
+end
+
+local function clearESP(char)
+    local cache = ESP_CACHE[char]
+    if cache then
+        pcall(function()
+            for _, obj in pairs(cache) do
+                if obj and obj.Remove then
+                    obj.Visible = false
+                    obj:Remove()
+                end
+            end
+        end)
+        ESP_CACHE[char] = nil
+    end
+    clearHighlight(char)
+end
+
+-- NEW: prediction-aware target position
+local function predictedPos(hrp, hum)
+    if not hrp then return nil end
+    if not PREDICTION or PREDICTION <= 0 then return hrp.Position end
+    return hrp.Position + (hrp.AssemblyLinearVelocity * PREDICTION)
+end
+
+local function getTarget()
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    local closest, target = math.huge, nil
+
+    for _,p in ipairs(Players:GetPlayers()) do
+        local char = p.Character
+        if p ~= LocalPlayer and char and isAlive(char) and not isTeammate(p) then
+            local head = char:FindFirstChild("Head")
+            local hrp  = char:FindFirstChild("HumanoidRootPart")
+            if head and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= MaxDistance and isVisible(head, char) then
+                local aimPart = HEADSHOT_ONLY and head or hrp
+                local world = predictedPos(aimPart, char:FindFirstChildOfClass("Humanoid"))
+                local s,on = Camera:WorldToViewportPoint(world)
+                if on then
+                    local d = (Vector2.new(s.X,s.Y) - center).Magnitude
+                    if d < FOV and d < closest then
+                        closest, target = d, aimPart
+                    end
+                end
+            end
+        end
+    end
+    return target
+end
+--[[ 
+    ==================================================
+    [PART 3/4] ESP, NPCS & RENDER LOOP ENGINE
+    ==================================================
+]]
+
+-- NEW: full player ESP (box + health + name + distance)
+local function ESP_FULL_SYSTEM()
+    for _,p in ipairs(Players:GetPlayers()) do
+        local char = p.Character
+        if p ~= LocalPlayer and char and isCharValid(char) and isAlive(char) and not isTeammate(p) then
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if not hrp or not hum then clearESP(char) continue end
+
+            local dist = (Camera.CFrame.Position - hrp.Position).Magnitude
+            if dist > MaxDistance then
+                if ESP_CACHE[char] then
+                    for _,o in pairs(ESP_CACHE[char]) do o.Visible = false end
+                end
+                continue
+            end
+
+            if not ESP_CACHE[char] then
+                local box = Drawing.new("Square")
+                box.Thickness = 1
+                box.Filled = false
+                box.Color = Color3.fromRGB(255, 255, 255)
+
+                local name = Drawing.new("Text")
+                name.Center = true
+                name.Outline = true
+                name.Font = 2
+                name.Size = 14
+                name.Color = Color3.fromRGB(255, 255, 255)
+
+                local hp = Drawing.new("Text")
+                hp.Center = true
+                hp.Outline = true
+                hp.Font = 2
+                hp.Size = 12
+                hp.Color = Color3.fromRGB(0, 255, 0)
+
+                local tr = Drawing.new("Line")
+                tr.Thickness = 1
+                tr.Color = Color3.fromRGB(255, 200, 0)
+
+                ESP_CACHE[char] = {Box = box, Name = name, HP = hp, Tracer = tr}
+            end
+
+            local cache = ESP_CACHE[char]
+            local head = char:FindFirstChild("Head")
+            local top = head and head.Position + Vector3.new(0, 1.2, 0) or hrp.Position + Vector3.new(0, 2.5, 0)
+            local bottom = hrp.Position - Vector3.new(0, 3, 0)
+            local sTop, onTop = Camera:WorldToViewportPoint(top)
+            local sBot, onBot = Camera:WorldToViewportPoint(bottom)
+
+            if onTop and onBot then
+                local h = math.abs(sBot.Y - sTop.Y)
+                local w = h * 0.55
+
+                cache.Box.Size = Vector2.new(w, h)
+                cache.Box.Position = Vector2.new(sTop.X - w/2, sTop.Y)
+                cache.Box.Color = (CurrentTarget and CurrentTarget:IsDescendantOf(char)) and Color3.fromRGB(255,60,60) or Color3.fromRGB(255,255,255)
+                cache.Box.Visible = BoxESPEnabled
+
+                cache.Name.Text = p.Name
+                cache.Name.Position = Vector2.new(sTop.X, sTop.Y - 18)
+                cache.Name.Visible = NameESPEnabled
+
+                local pct = hum.Health / hum.MaxHealth
+                cache.HP.Text = string.format("%d / %d", math.floor(hum.Health), math.floor(hum.MaxHealth))
+                cache.HP.Position = Vector2.new(sTop.X, sBot.Y + 4)
+                cache.HP.Color = Color3.fromRGB(255*(1-pct), 255*pct, 0)
+                cache.HP.Visible = HealthESPEnabled
+
+                if TracerEnabled then
+                    local cp = Camera.ViewportSize / 2
+                    cache.Tracer.From = Vector2.new(cp.X, Camera.ViewportSize.Y)
+                    cache.Tracer.To = Vector2.new(sTop.X, sBot.Y)
+                    cache.Tracer.Visible = true
+                else
+                    cache.Tracer.Visible = false
+                end
+            else
+                for _,o in pairs(cache) do o.Visible = false end
+            end
+        else
+            if char then clearESP(char) end
+        end
+    end
+end
+
+-- NEW: chams (highlight every enemy in solid color)
+local function CHAMS_SYSTEM()
+    if not ChamsEnabled then
+        for char,_ in pairs(HIGHLIGHT_CACHE) do clearHighlight(char) end
+        return
+    end
+    for _,p in ipairs(Players:GetPlayers()) do
+        local char = p.Character
+        if p ~= LocalPlayer and char and isCharValid(char) and isAlive(char) and not isTeammate(p) then
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if not hrp or (Camera.CFrame.Position - hrp.Position).Magnitude > MaxDistance then
+                clearHighlight(char) continue
+
+
