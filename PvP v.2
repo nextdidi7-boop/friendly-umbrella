@@ -1,12 +1,9 @@
 --[[ 
     ==================================================
-    [PART 1.1/3] SERVICES, VARIABLES & GUN MOD LOGIC
+    [PART 1/4] SERVICES, VARIABLES & REFACTORED GUN SYSTEM
     ==================================================
 ]]
 
---------------------------------------------------
--- Load WindUI & Services
---------------------------------------------------
 local WindUI
 do
     local ok, result = pcall(function()
@@ -61,16 +58,15 @@ local BigHeadEnabled = false
 local BigHeadSize = 5
 local OriginalSizes = {}
 
--- Combat & Gun Mods Variables (Updated)
+-- Combat & Gun Mods Variables (Bypass Server Mode)
 local FireRateVal = 0.1
-local FastFireEnabled = false
 local AutoReturnFire = false
 local AutoShootEnabled = false
 local BurstTwoEnabled = false
 local GodModeEnabled = false
 
 local AutoReloadEnabled = false
-local ReloadSpeedVal = 0.1
+local ReloadSpeedVal = 0.2
 local IsReloading = false
 
 local LastShootTime = 0
@@ -86,7 +82,7 @@ end
 
 local function isTeammate(p)
     if not TeamCheck then return false end
-    if not LocalPlayer.Team or not p.Team then return false end
+    if not LocalPlayer.Team or not p.Team meant return false end
     return p.Team == LocalPlayer.Team
 end
 
@@ -106,19 +102,39 @@ local function getEquippedTool()
     return nil
 end
 
+-- Valid Shot Trigger (Real Server Damage)
 local function fireGun()
     if IsReloading then return end
     local tool = getEquippedTool()
     if tool then
         tool:Activate()
-        if FastFireEnabled then
-            task.wait(FireRateVal)
-            tool:Deactivate()
-        end
+        task.wait(math.clamp(FireRateVal, 0.05, 1))
+        tool:Deactivate()
     end
 end
 
--- Auto Reload Logic
+-- Server-Bypass Fast Reload (Equip-Refresh Trick)
+local function fastReload()
+    if IsReloading then return end
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local tool = getEquippedTool()
+
+    if hum and tool then
+        IsReloading = true
+        
+        -- รอเวลาตาม Slider (ถ้าปรับเหลือน้อย จะใช้เทคนิคสลับปืนไว Bypass Server Animation)
+        task.wait(ReloadSpeedVal)
+        
+        hum:UnequipTools()
+        task.wait(0.05)
+        hum:EquipTool(tool)
+        
+        IsReloading = false
+    end
+end
+
+-- Auto Reload Detector
 local function handleAutoReload()
     if not AutoReloadEnabled or IsReloading then return end
     local tool = getEquippedTool()
@@ -127,11 +143,7 @@ local function handleAutoReload()
             if v:IsA("IntValue") or v:IsA("NumberValue") then
                 local name = v.Name:lower()
                 if (name:find("ammo") or name:find("clip") or name:find("bullet")) and v.Value <= 0 then
-                    IsReloading = true
-                    task.wait(ReloadSpeedVal)
-                    local maxAmmo = tool:FindFirstChild("MaxAmmo") or tool:FindFirstChild("ClipSize")
-                    v.Value = maxAmmo and maxAmmo.Value or 30
-                    IsReloading = false
+                    fastReload()
                     break
                 end
             end
@@ -139,24 +151,17 @@ local function handleAutoReload()
     end
 end
 
--- Godmode & Stepped Loop
+-- Loop Updates
 RunService.Stepped:Connect(function()
     if GodModeEnabled and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if hum then 
-            hum.Health = hum.MaxHealth 
-        end
-        for _, part in ipairs(LocalPlayer.Character:GetChildren()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = true
-            end
-        end
+        if hum then hum.Health = hum.MaxHealth end
     end
     handleAutoReload()
 end)
 --[[ 
     ==================================================
-    [PART 1.2/3] VISUALS, HITBOX, NPCS & LOOP ENGINE
+    [PART 2/4] VISUALS, HITBOX & TARGETING ENGINE
     ==================================================
 ]]
 
@@ -261,7 +266,7 @@ RunService.Heartbeat:Connect(function(dt)
     end
 end)
 
--- Target Detection & Raycasting
+-- Raycasting & Target Detection
 local RayParams = RaycastParams.new()
 RayParams.FilterType = Enum.RaycastFilterType.Blacklist
 RayParams.IgnoreWater = true
@@ -302,6 +307,34 @@ local function clearESP(char)
     end
     clearHighlight(char)
 end
+
+local function getTarget()
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    local closest, target = math.huge, nil
+
+    for _,p in ipairs(Players:GetPlayers()) do
+        local char = p.Character
+        if p ~= LocalPlayer and char and isAlive(char) and not isTeammate(p) then
+            local head = char:FindFirstChild("Head")
+            local hrp  = char:FindFirstChild("HumanoidRootPart")
+            if head and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= MaxDistance and isVisible(head, char) then
+                local s,on = Camera:WorldToViewportPoint(head.Position)
+                if on then
+                    local d = (Vector2.new(s.X,s.Y) - center).Magnitude
+                    if d < FOV and d < closest then
+                        closest, target = d, head
+                    end
+                end
+            end
+        end
+    end
+    return target
+end
+--[[ 
+    ==================================================
+    [PART 3/4] ESP, NPCS & RENDER LOOP ENGINE
+    ==================================================
+]]
 
 local function ESP_SYSTEM()
     if not ESP_ENABLED then
@@ -377,35 +410,12 @@ local function RAINBOW_ESP_SYSTEM()
     end
 end
 
-local function getTarget()
-    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-    local closest, target = math.huge, nil
-
-    for _,p in ipairs(Players:GetPlayers()) do
-        local char = p.Character
-        if p ~= LocalPlayer and char and isAlive(char) and not isTeammate(p) then
-            local head = char:FindFirstChild("Head")
-            local hrp  = char:FindFirstChild("HumanoidRootPart")
-            if head and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= MaxDistance and isVisible(head, char) then
-                local s,on = Camera:WorldToViewportPoint(head.Position)
-                if on then
-                    local d = (Vector2.new(s.X,s.Y) - center).Magnitude
-                    if d < FOV and d < closest then
-                        closest, target = d, head
-                    end
-                end
-            end
-        end
-    end
-    return target
-end
-
 local function cameraLookAt(part)
     if not part then return end
     Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
 end
 
--- Input & Character Event Connections
+-- Event Listeners & Auto Return Fire
 UserInputService.JumpRequest:Connect(function()
     if InfiniteJumpEnabled and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -447,7 +457,7 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
--- Hitbox Adjuster
+-- Server Side Valid Hitbox Adjuster
 local function UpdateHitbox()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then
@@ -496,7 +506,7 @@ local function UpdateHitbox()
     end
 end
 
--- NPC Scan Task
+-- NPC Scanner
 task.spawn(function()
     while task.wait(0.1) do
         if not ESP_NPC_ENABLED then
@@ -556,7 +566,7 @@ local function joinLowPlayerServer()
     end
 end
 
--- Main Render Loop
+-- Main Loop Engine
 RunService.RenderStepped:Connect(function()
     local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
 
@@ -603,7 +613,7 @@ RunService.RenderStepped:Connect(function()
 end)
 --[[ 
     ==================================================
-    [PART 3/3] UI INTERFACE & WINDOW CONTROL
+    [PART 4/4] UI INTERFACE & WINDOW CONTROL
     ==================================================
 ]]
 
@@ -659,7 +669,7 @@ AimbotTab:Toggle({
     Callback = function(v) TeamCheck = v end
 })
 
-AimbotTab:Section({Title = "Gun Modifies (Updated)"})
+AimbotTab:Section({Title = "Gun Modifies (Real Damage Bypass)"})
 
 AimbotTab:Toggle({
     Title = "1. รีโหลดกระสุนอัตโนมัติ (Auto Reload)", 
@@ -668,18 +678,17 @@ AimbotTab:Toggle({
 
 AimbotTab:Slider({
     Title = "2. ความเร็วในการรีโหลด (Reload Speed)", 
-    Value = {Min = 0.01, Max = 2, Default = ReloadSpeedVal}, 
-    Step = 0.01,
+    Value = {Min = 0.05, Max = 2, Default = ReloadSpeedVal}, 
+    Step = 0.05,
     Callback = function(v) ReloadSpeedVal = v end
 })
 
 AimbotTab:Slider({
-    Title = "3. ปรับอัตราการยิง (Fire Rate)", 
-    Value = {Min = 0.01, Max = 1, Default = FireRateVal}, 
+    Title = "3. ปรับอัตราการยิง (Fire Rate Delay)", 
+    Value = {Min = 0.05, Max = 1, Default = FireRateVal}, 
     Step = 0.01,
     Callback = function(v) 
         FireRateVal = v 
-        FastFireEnabled = true
     end
 })
 
