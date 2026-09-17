@@ -1,41 +1,46 @@
 --[[
-    [PART 1/2] CORE ENGINES & LOGIC SYSTEMS
-    Dolly Hub Engine | Burst Fire & Auto Counter-Fire System
+    Dolly Hub - Complete Script
+    PART 1/3: Core Services, States & Weapon Systems
 ]]
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
 
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
 --------------------------------------------------
--- Global Variables
+-- Load WindUI Library
 --------------------------------------------------
-_G.CAMERA_LOCK = false
-_G.TargetPartName = "Head"
-_G.FOV = 200
-_G.MaxDistance = 600
+local WindUI
+local successLoad, err = pcall(function()
+    return loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
+end)
 
-_G.BurstFireEnabled = false
-_G.RapidFireEnabled = false
-_G.AutoCounterEnabled = false
+if not successLoad or not WindUI then
+    warn("Failed to load WindUI: ", err)
+    return
+end
+
+--------------------------------------------------
+-- Global States & Settings
+--------------------------------------------------
+local CAMERA_LOCK = false
+local ESP_ENABLED = false
+local TeamCheck = true
+local MaxDistance = 600
+local FOV = 200
+
+local RapidFireEnabled = false
+local RapidFireDelay = 0.01
+local BurstFireEnabled = false
+local AutoCounterEnabled = false
 
 local LastHealth = 100
 local CurrentTarget = nil
-
---------------------------------------------------
--- Drawing Elements
---------------------------------------------------
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Thickness = 2
-FOVCircle.Filled = false
-FOVCircle.Color = Color3.fromRGB(255, 255, 0)
-
-local AimLine = Drawing.new("Line")
-AimLine.Thickness = 2
-AimLine.Color = Color3.fromRGB(255, 0, 0)
+local TargetPartName = "Head"
 
 --------------------------------------------------
 -- Helper Functions
@@ -45,276 +50,36 @@ local function isAlive(char)
     return hum and hum.Health > 0
 end
 
-local function cameraLookAt(part)
-    if not part then return end
-    Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
-end
-
-local function getTarget()
-    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    local closest, target = math.huge, nil
-
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer then
-            local char = p.Character
-            if char and isAlive(char) then
-                local targetPart = char:FindFirstChild(_G.TargetPartName) or char:FindFirstChild("Head")
-                local hrp = char:FindFirstChild("HumanoidRootPart")
-                if targetPart and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= _G.MaxDistance then
-                    local pos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-                    if onScreen then
-                        local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
-                        if dist < _G.FOV and dist < closest then
-                            closest = dist
-                            target = targetPart
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return target
-end
-
---------------------------------------------------
--- Weapon Systems (Burst & Rapid Fire)
---------------------------------------------------
-task.spawn(function()
-    while true do
-        task.wait(0.01)
-        if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-            local char = LocalPlayer.Character
-            if char then
-                local tool = char:FindFirstChildOfClass("Tool")
-                if tool then
-                    if _G.BurstFireEnabled then
-                        -- ระบบยิงทีละ 2 นัด
-                        pcall(function()
-                            tool:Activate()
-                            task.wait(0.05)
-                            tool:Activate()
-                        end)
-                        task.wait(0.15)
-                    elseif _G.RapidFireEnabled then
-                        pcall(function() tool:Activate() end)
-                    end
-                end
-            end
-        end
-    end
-end)
-
---------------------------------------------------
--- Auto Counter-Fire System (ยิงโต้กลับ)
---------------------------------------------------
-local function TriggerRetaliation()
-    if not _G.AutoCounterEnabled then return end
-    local char = LocalPlayer.Character
-    if not char then return end
-
-    local tool = char:FindFirstChildOfClass("Tool")
-    if not tool then return end -- ต้องถือปืนอยู่เท่านั้น
-
-    local closest, attacker = math.huge, nil
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer then
-            local pChar = p.Character
-            if pChar and isAlive(pChar) then
-                local hrp = pChar:FindFirstChild("HumanoidRootPart")
-                local head = pChar:FindFirstChild("Head")
-                if hrp then
-                    local dist = (char.HumanoidRootPart.Position - hrp.Position).Magnitude
-                    if dist < closest then
-                        closest = dist
-                        attacker = head or hrp
-                    end
-                end
-            end
-        end
-    end
-
-    if attacker then
-        -- หันหน้าไปหาศัตรูทันที แล้วกระหน่ำยิงโต้กลับ 10 นัด
-        task.spawn(function()
-            for i = 1, 10 do
-                if not isAlive(char) then break end
-                cameraLookAt(attacker)
-                pcall(function() tool:Activate() end)
-                task.wait(0.02)
-            end
-        end)
-    end
-end
-
-local function BindHealthCheck(char)
-    local hum = char:WaitForChild("Humanoid", 5)
-    if hum then
-        LastHealth = hum.Health
-        hum.HealthChanged:Connect(function(newHealth)
-            if newHealth < LastHealth then
-                TriggerRetaliation()
-            end
-            LastHealth = newHealth
-        end)
-    end
-end
-
-if LocalPlayer.Character then BindHealthCheck(LocalPlayer.Character) end
-LocalPlayer.CharacterAdded:Connect(BindHealthCheck)
-
---------------------------------------------------
--- Main Render Loop
---------------------------------------------------
-RunService.RenderStepped:Connect(function()
-    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-
-    FOVCircle.Position = center
-    FOVCircle.Radius = _G.FOV
-    FOVCircle.Visible = _G.CAMERA_LOCK
-
-    AimLine.Visible = false
-    CurrentTarget = nil
-
-    if _G.CAMERA_LOCK then
-        CurrentTarget = getTarget()
-        if CurrentTarget then
-            cameraLookAt(CurrentTarget)
-            local p = Camera:WorldToViewportPoint(CurrentTarget.Position)
-            AimLine.From = center
-            AimLine.To = Vector2.new(p.X, p.Y)
-            AimLine.Visible = true
-        end
-    end
-end)
---[[ 
-    [PART 1/2] CORE ENGINES & LOGIC SYSTEMS
-    Dolly Hub | SILENT AIM + ESP + BOOB PHYSICS + HITBOX + BURST & COUNTER FIRE
-]]
-
---------------------------------------------------
--- Load WindUI & Services
---------------------------------------------------
-local WindUI
-do
-    local ok, result = pcall(function()
-        return require("./src/Init")
-    end)
-    WindUI = ok and result or loadstring(game:HttpGet(
-        "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"
-    ))()
-end
-
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local Lighting = game:GetService("Lighting")
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
-
-local Camera = workspace.CurrentCamera
-local LocalPlayer = Players.LocalPlayer
-
---------------------------------------------------
--- Global States & Variables
---------------------------------------------------
-_G.SilentAim   = false
-_G.CAMERA_LOCK = false
-_G.ESP_ENABLED = false
-_G.RAINBOW_ESP = false
-
-_G.TeamCheck  = true
-_G.MaxDistance = 600
-_G.FOV = 200
-
-_G.RapidFireEnabled = false
-_G.RapidFireDelay = 0.01
-
-_G.BurstFireEnabled = false
-_G.AutoCounterEnabled = false
-local LastHealth = 100
-
-_G.CurrentTarget = nil
-_G.TargetPartName = "Head"
-_G.ESP_CACHE = {}
-_G.HIGHLIGHT_CACHE = {}
-
-_G.WalkSpeedVal = 16
-_G.WalkSpeedEnabled = false
-_G.InfiniteJumpEnabled = false
-
-_G.BrightnessVal = 1
-_G.FullbrightEnabled = false
-_G.OriginalBrightness = Lighting.Brightness
-_G.OriginalClockTime = Lighting.ClockTime
-
-_G.ESP_NPC_ENABLED = false
-_G.NPC_CACHE = {}
-
-_G.HitboxEnabled = false
-_G.HitboxSize = 10
-_G.OriginalSizes = {}
-
-_G.BoobSettings = {
-    Enabled = false,
-    Stiffness = 12,
-    Damping = 0.15,
-    Size = 1.0
-}
-
-local CreatedBoobParts = {}
-local LeftMeshWeld, RightMeshWeld = nil, nil
-local BaseLeftC0 = CFrame.new(-0.42, 0.1, -0.52)
-local BaseRightC0 = CFrame.new(0.42, 0.1, -0.52)
-
-local PhysPos = Vector3.new(0,0,0)
-local PhysVel = Vector3.new(0,0,0)
-local LastHRPPos = nil
-
---------------------------------------------------
--- Utility & Core Logic Functions
---------------------------------------------------
-local function isAlive(char)
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    return hum and hum.Health > 0
-end
-
 local function isTeammate(p)
-    if not _G.TeamCheck then return false end
+    if not TeamCheck then return false end
     if not LocalPlayer.Team or not p.Team then return false end
     return p.Team == LocalPlayer.Team
 end
 
-local function rainbowColor(speed)
-    local t = tick() * speed
-    return Color3.fromHSV(t % 1, 1, 1)
-end
-
-local function isCharValid(char)
-    return char and char.Parent and char:IsDescendantOf(workspace)
-end
-
 local function cameraLookAt(part)
     if not part then return end
     Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
 end
 
--- Rapid Fire & Burst Fire Logic
+--------------------------------------------------
+-- Weapon Mechanics (Rapid / Burst / Counter)
+--------------------------------------------------
 task.spawn(function()
     while true do
-        task.wait(_G.RapidFireDelay)
+        task.wait(RapidFireDelay)
         if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
             local char = LocalPlayer.Character
             if char then
                 local tool = char:FindFirstChildOfClass("Tool")
                 if tool then
-                    if _G.BurstFireEnabled then
+                    if BurstFireEnabled then
                         pcall(function()
                             tool:Activate()
                             task.wait(0.05)
                             tool:Activate()
                         end)
                         task.wait(0.15)
-                    elseif _G.RapidFireEnabled then
+                    elseif RapidFireEnabled then
                         pcall(function()
                             tool:Activate()
                         end)
@@ -325,9 +90,8 @@ task.spawn(function()
     end
 end)
 
--- Auto Counter-Fire System
 local function TriggerRetaliation()
-    if not _G.AutoCounterEnabled then return end
+    if not AutoCounterEnabled then return end
     local char = LocalPlayer.Character
     if not char then return end
     
@@ -379,93 +143,26 @@ local function BindHealthCheck(char)
 end
 
 if LocalPlayer.Character then BindHealthCheck(LocalPlayer.Character) end
-
--- Boob Physics Engine
-function DestroyBoobs()
-    for _, v in ipairs(CreatedBoobParts) do
-        if v and v.Parent then pcall(function() v:Destroy() end) end
-    end
-    CreatedBoobParts = {}
-    LeftMeshWeld, RightMeshWeld = nil, nil
-end
-
-function BuildSoftBoob(char)
-    DestroyBoobs()
-    if not char or not char.Parent then return end
-    
-    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
-    local head = char:FindFirstChild("Head")
-    if not torso then return end
-    
-    local skinCol = head and head.Color or torso.Color
-    local pink1 = Color3.fromRGB(255, 130, 155)
-    local pink2 = Color3.fromRGB(255, 80, 120)
-    local s = _G.BoobSettings.Size
-
-    local function createSphere(cf, size, col, parentWeld)
-        local p = Instance.new("Part")
-        p.Shape = Enum.PartType.Ball
-        p.Size = size
-        p.Color = col
-        p.Material = Enum.Material.SmoothPlastic
-        p.CanCollide = false
-        p.Massless = true
-        p.Parent = char
-
-        local w = Instance.new("Weld")
-        w.Part0 = parentWeld or torso
-        w.Part1 = p
-        w.C0 = cf
-        w.Parent = p
-        
-        table.insert(CreatedBoobParts, p)
-        return p, w
-    end
-
-    local lMain, lW = createSphere(BaseLeftC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
-    local rMain, rW = createSphere(BaseRightC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
-    LeftMeshWeld = lW
-    RightMeshWeld = rW
-
-    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, lMain)
-    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, rMain)
-
-    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, lMain)
-    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, rMain)
-    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, lMain)
-    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, rMain)
-end
-
-RunService.Heartbeat:Connect(function(dt)
-    if _G.BoobSettings.Enabled and LocalPlayer.Character then
-        local hrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-        if hrp and LeftMeshWeld and RightMeshWeld then
-            local pos = hrp.Position
-            if LastHRPPos then
-                local delta = (pos - LastHRPPos)
-                local moveVel = hrp.CFrame:VectorToObjectSpace(delta / dt)
-                
-                local targetOff = Vector3.new(
-                    math.clamp(-moveVel.X * 0.02, -0.4, 0.4),
-                    math.clamp(-moveVel.Y * 0.03, -0.5, 0.5),
-                    math.clamp(moveVel.Z * 0.02, -0.3, 0.3)
-                )
-
-                local force = (targetOff - PhysPos) * _G.BoobSettings.Stiffness
-                PhysVel = (PhysVel + force * dt) * (1 - math.clamp(_G.BoobSettings.Damping, 0, 1))
-                PhysPos = PhysPos + PhysVel * dt
-            end
-            LastHRPPos = pos
-
-            LeftMeshWeld.C0 = BaseLeftC0 * CFrame.new(PhysPos) * CFrame.Angles(PhysPos.Y * 0.9, -PhysPos.X * 0.8, PhysPos.X * 0.4)
-            RightMeshWeld.C0 = BaseRightC0 * CFrame.new(PhysPos) * CFrame.Angles(PhysPos.Y * 0.9, PhysPos.X * 0.8, -PhysPos.X * 0.4)
-        end
-    else
-        LastHRPPos = nil
-    end
+LocalPlayer.CharacterAdded:Connect(function(char)
+    BindHealthCheck(char)
 end)
+--[[
+    Dolly Hub - Complete Script
+    PART 2/3: Visual Elements & Target Acquisition Loop
+]]
 
--- Aim & ESP Mechanics
+--------------------------------------------------
+-- Drawing & Visuals Setup
+--------------------------------------------------
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 2
+FOVCircle.Filled = false
+FOVCircle.Color = Color3.fromRGB(255, 255, 0)
+
+local AimLine = Drawing.new("Line")
+AimLine.Thickness = 2
+AimLine.Color = Color3.fromRGB(255, 0, 0)
+
 local RayParams = RaycastParams.new()
 RayParams.FilterType = Enum.RaycastFilterType.Blacklist
 RayParams.IgnoreWater = true
@@ -477,169 +174,21 @@ local function isVisible(part, char)
     return not workspace:Raycast(origin, dir, RayParams)
 end
 
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Thickness = 2
-FOVCircle.Filled = false
-FOVCircle.Color = Color3.fromRGB(255,255,0)
-
-local AimLine = Drawing.new("Line")
-AimLine.Thickness = 2
-AimLine.Color = Color3.fromRGB(255,0,0)
-
-local function clearHighlight(char)
-    if _G.HIGHLIGHT_CACHE[char] then
-        pcall(function() _G.HIGHLIGHT_CACHE[char]:Destroy() end)
-        _G.HIGHLIGHT_CACHE[char] = nil
-    end
-end
-
-local function clearESP(char)
-    local cache = _G.ESP_CACHE[char]
-    if cache then
-        pcall(function()
-            if cache.Text then
-                cache.Text.Visible = false
-                cache.Text:Remove()
-            end
-        end)
-        _G.ESP_CACHE[char] = nil
-    end
-    clearHighlight(char)
-end
-
-local function ESP_SYSTEM()
-    if not _G.ESP_ENABLED then
-        for char,_ in pairs(_G.ESP_CACHE) do clearESP(char) end
-        return
-    end
-
-    for _,p in ipairs(Players:GetPlayers()) do
-        local char = p.Character
-        if p ~= LocalPlayer and char and isCharValid(char) and isAlive(char) and not isTeammate(p) then
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if not hrp then clearESP(char) continue end
-
-            local dist = (Camera.CFrame.Position - hrp.Position).Magnitude
-            if dist > _G.MaxDistance then
-                if _G.ESP_CACHE[char] then _G.ESP_CACHE[char].Text.Visible = false end
-                continue
-            end
-
-            if not _G.ESP_CACHE[char] then
-                local t = Drawing.new("Text")
-                t.Center = true
-                t.Outline = true
-                t.Font = 2
-                t.Size = 14
-                _G.ESP_CACHE[char] = {Text = t}
-            end
-
-            local txt = _G.ESP_CACHE[char].Text
-            local pos, on = Camera:WorldToViewportPoint(hrp.Position)
-            if on then
-                txt.Text = p.Name.." ["..math.floor(dist).."m]"
-                txt.Position = Vector2.new(pos.X, pos.Y - 28)
-                txt.Color = (_G.CurrentTarget and _G.CurrentTarget:IsDescendantOf(char)) and Color3.fromRGB(255,60,60) or Color3.fromRGB(255,255,255)
-                txt.Visible = true
-            else
-                txt.Visible = false
-            end
-        else
-            if char then clearESP(char) end
-        end
-    end
-end
-
-local function RAINBOW_ESP_SYSTEM()
-    if not _G.RAINBOW_ESP then
-        for char,_ in pairs(_G.HIGHLIGHT_CACHE) do clearHighlight(char) end
-        return
-    end
-
-    for _,p in ipairs(Players:GetPlayers()) do
-        local char = p.Character
-        if p ~= LocalPlayer and char and isCharValid(char) and isAlive(char) and not isTeammate(p) then
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if not hrp or (Camera.CFrame.Position - hrp.Position).Magnitude > _G.MaxDistance then
-                clearHighlight(char)
-                continue
-            end
-
-            if not _G.HIGHLIGHT_CACHE[char] then
-                local h = Instance.new("Highlight")
-                h.Adornee = char
-                h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
-                h.FillTransparency = 1
-                h.OutlineTransparency = 0
-                h.Parent = workspace
-                _G.HIGHLIGHT_CACHE[char] = h
-            end
-            _G.HIGHLIGHT_CACHE[char].OutlineColor = rainbowColor(0.25)
-        else
-            if char then clearHighlight(char) end
-        end
-    end
-end
-
 local function getTarget()
-    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-    local closest, target = math.huge, nil
-
-    for _,p in ipairs(Players:GetPlayers()) do
-        local char = p.Character
-        if p ~= LocalPlayer and char and isAlive(char) and not isTeammate(p) then
-            local targetPart = char:FindFirstChild(_G.TargetPartName) or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
-            local hrp  = char:FindFirstChild("HumanoidRootPart")
-            if targetPart and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= _G.MaxDistance and isVisible(targetPart, char) then
-                local s,on = Camera:WorldToViewportPoint(targetPart.Position)
-                if on then
-                    local d = (Vector2.new(s.X,s.Y) - center).Magnitude
-                    if d < _G.FOV and d < closest then
-                        closest, target = d, targetPart
-                    end
-          --[[
-    [PART 2/3] VISUALS & TARGETING SYSTEM
-    Dolly Hub | Drawing & Target Acquisition Loop
-]]
-
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local Camera = workspace.CurrentCamera
-local LocalPlayer = Players.LocalPlayer
-
---------------------------------------------------
--- Drawing Visuals Initialization
---------------------------------------------------
-local FOVCircle = Drawing.new("Circle")
-FOVCircle.Thickness = 2
-FOVCircle.Filled = false
-FOVCircle.Color = Color3.fromRGB(255, 255, 0)
-
-local AimLine = Drawing.new("Line")
-AimLine.Thickness = 2
-AimLine.Color = Color3.fromRGB(255, 0, 0)
-
---------------------------------------------------
--- Target Acquisition Engine
---------------------------------------------------
-function _G.getTarget()
     local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     local closest, target = math.huge, nil
 
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer then
-            local char = p.Character
-            if char and _G.isAlive(char) then
-                local targetPart = char:FindFirstChild(_G.TargetPartName) or char:FindFirstChild("Head")
-                local hrp = char:FindFirstChild("HumanoidRootPart")
-                if targetPart and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= _G.MaxDistance then
-                    local pos, onScreen = Camera:WorldToViewportPoint(targetPart.Position)
-                    if onScreen then
-                        local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
-                        if dist < _G.FOV and dist < closest then
-                            closest = dist
-                            target = targetPart
-                        end
+        local char = p.Character
+        if p ~= LocalPlayer and char and isAlive(char) and not isTeammate(p) then
+            local targetPart = char:FindFirstChild(TargetPartName) or char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if targetPart and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= MaxDistance and isVisible(targetPart, char) then
+                local s, on = Camera:WorldToViewportPoint(targetPart.Position)
+                if on then
+                    local d = (Vector2.new(s.X, s.Y) - center).Magnitude
+                    if d < FOV and d < closest then
+                        closest, target = d, targetPart
                     end
                 end
             end
@@ -648,108 +197,90 @@ function _G.getTarget()
     return target
 end
 
---------------------------------------------------
--- Main Render Stepped Loop
---------------------------------------------------
 RunService.RenderStepped:Connect(function()
     local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 
     FOVCircle.Position = center
-    FOVCircle.Radius = _G.FOV or 200
-    FOVCircle.Visible = _G.CAMERA_LOCK or false
+    FOVCircle.Radius = FOV
+    FOVCircle.Visible = CAMERA_LOCK
 
     AimLine.Visible = false
-    _G.CurrentTarget = nil
+    CurrentTarget = nil
 
-    if _G.CAMERA_LOCK then
-        _G.CurrentTarget = _G.getTarget()
-        if _G.CurrentTarget then
-            _G.cameraLookAt(_G.CurrentTarget)
-            local p = Camera:WorldToViewportPoint(_G.CurrentTarget.Position)
-            AimLine.From = center
-            AimLine.To = Vector2.new(p.X, p.Y)
-            AimLine.Visible = true
-        end
+    if CAMERA_LOCK then 
+        CurrentTarget = getTarget() 
+    end
+    
+    if CAMERA_LOCK and CurrentTarget then 
+        cameraLookAt(CurrentTarget)
+        local p = Camera:WorldToViewportPoint(CurrentTarget.Position)
+        AimLine.From = center
+        AimLine.To = Vector2.new(p.X, p.Y)
+        AimLine.Visible = true
     end
 end)
 --[[
-    [PART 3/3] USER INTERFACE
-    Dolly Hub | Rayfield Interface Controls
+    Dolly Hub - Complete Script
+    PART 3/3: WindUI Controls Setup
 ]]
 
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
-local Window = Rayfield:CreateWindow({
-   Name = "Dolly Hub",
-   LoadingTitle = "Dolly Hub Loading...",
-   LoadingSubtitle = "by Dolly Team",
-   ConfigurationSaving = { Enabled = false },
-   KeySystem = false
-})
-
 --------------------------------------------------
--- COMBAT & GUN MODS TAB
+-- UI Interface Construction
 --------------------------------------------------
-local CombatTab = Window:CreateTab("Combat", 4483362458)
-
-CombatTab:CreateSection("Aimbot Settings")
-
-CombatTab:CreateToggle({
-   Name = "ล็อคหัว (Lock Target)",
-   CurrentValue = _G.CAMERA_LOCK,
-   Callback = function(Value)
-      _G.CAMERA_LOCK = Value
-   end,
+local Window = WindUI:CreateWindow({
+    Title = "Dolly Hub",
+    Subtitle = "นึกถึงสคริปต์ที่ดีที่สุด",
+    Folder = "DollyHub",
+    OpenButton = {Title = "Dolly Hub", Enabled = true}
 })
 
-CombatTab:CreateDropdown({
-   Name = "เลือกตำแหน่งล็อค",
-   Options = {"ศีรษะ (Head)", "ลำตัว (Torso)"},
-   CurrentOption = {"ศีรษะ (Head)"},
-   Callback = function(Option)
-      if Option[1] == "ศีรษะ (Head)" then
-         _G.TargetPartName = "Head"
-      else
-         _G.TargetPartName = "HumanoidRootPart"
-      end
-   end,
+local AimbotTab = Window:Tab({Title = "Aimbot", Icon = "crosshair"})
+
+AimbotTab:Section({ Title = "Aimbot Settings" })
+
+AimbotTab:Toggle({
+    Title = "ล็อคหัว (Aimbot)",
+    Default = CAMERA_LOCK,
+    Callback = function(v) CAMERA_LOCK = v end
 })
 
-CombatTab:CreateSlider({
-   Name = "ขนาด FOV",
-   Range = {50, 800},
-   Increment = 10,
-   Suffix = "px",
-   CurrentValue = _G.FOV,
-   Callback = function(Value)
-      _G.FOV = Value
-   end,
+AimbotTab:Dropdown({
+    Title = "เลือกส่วนที่จะยิง",
+    Values = {"ศีรษะ", "ลำตัว"},
+    Default = "ศีรษะ",
+    Callback = function(v)
+        TargetPartName = (v == "ศีรษะ") and "Head" or "HumanoidRootPart"
+    end
 })
 
-CombatTab:CreateSection("Gun Modifies")
-
-CombatTab:CreateToggle({
-   Name = "ยิงทีละ 2 นัด (Burst Fire)",
-   CurrentValue = _G.BurstFireEnabled,
-   Callback = function(Value)
-      _G.BurstFireEnabled = Value
-      if Value then _G.RapidFireEnabled = false end
-   end,
+AimbotTab:Slider({
+    Title = "ขนาด FOV",
+    Value = {Min = 40, Max = 1000, Default = FOV},
+    Callback = function(v) FOV = v end
 })
 
-CombatTab:CreateToggle({
-   Name = "ยิงโต้กลับอัตโนมัติ (Auto Counter-Fire)",
-   CurrentValue = _G.AutoCounterEnabled,
-   Callback = function(Value)
-      _G.AutoCounterEnabled = Value
-   end,
+AimbotTab:Section({ Title = "Gun Modifies" })
+
+AimbotTab:Toggle({
+    Title = "ยิงทีละ 2 นัด (Burst Fire)",
+    Default = BurstFireEnabled,
+    Callback = function(v)
+        BurstFireEnabled = v
+        if v then RapidFireEnabled = false end
+    end
 })
 
-CombatTab:CreateToggle({
-   Name = "ยิงรัว (Rapid Fire)",
-   CurrentValue = _G.RapidFireEnabled,
-   Callback = function(Value)
-      _G.RapidFireEnabled = Value
-      if Value then _G.BurstFireEnabled = false end
-   end,
+AimbotTab:Toggle({
+    Title = "ยิงโต้กลับอัตโนมัติ (Auto Counter-Fire)",
+    Default = AutoCounterEnabled,
+    Callback = function(v) AutoCounterEnabled = v end
+})
+
+AimbotTab:Toggle({
+    Title = "ยิงรัว (Rapid Fire)",
+    Default = RapidFireEnabled,
+    Callback = function(v)
+        RapidFireEnabled = v
+        if v then BurstFireEnabled = false end
+    end
 })
