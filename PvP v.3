@@ -906,8 +906,8 @@ GunTab:Slider({
 
 --[[ 
     ==================================================
-    [Dolly Hub PvP v3] [PART 4/4 - FULL]
-    UI — AIM · GUN · UTILITY · MISC · VISUAL
+    [Dolly Hub PvP v3] [PART 4/4]
+    UI — AIM · GUN · PVP UTILITY · VISUAL · MISC
     ==================================================
 ]]
 
@@ -1036,8 +1036,11 @@ GunTab:Slider({
     Callback = function(v) ReloadSpeedVal = v end
 })
 
-GunTab:Section({Title = "God / Auto"})
-GunTab:Toggle({Title = "God Mode (HP ไม่ลด)", Callback = function(v) GodModeEnabled = v end})
+GunTab:Section({Title = "God Mode"})
+GunTab:Toggle({
+    Title = "God Mode (HP ไม่ลด)",
+    Callback = function(v) GodModeEnabled = v end
+})
 
 -- ═══════════════════════════════════════════════════════
 -- TAB: PVP UTILITY
@@ -1046,10 +1049,13 @@ GunTab:Toggle({Title = "God Mode (HP ไม่ลด)", Callback = function(v) G
 local UtilTab = Window:Tab({Title = "PvP Utility", Icon = "shield"})
 
 UtilTab:Section({Title = "Defense"})
-UtilTab:Toggle({Title = "Anti-Flinch (ไม่ล้ม)", Callback = function(v)
-    AntiFlinch = v
-    if LocalPlayer.Character then applyAntiFlinch(LocalPlayer.Character) end
-end})
+UtilTab:Toggle({
+    Title = "Anti-Flinch (ไม่ล้ม)",
+    Callback = function(v)
+        AntiFlinch = v
+        if LocalPlayer.Character then applyAntiFlinch(LocalPlayer.Character) end
+    end
+})
 UtilTab:Toggle({Title = "Anti-Stun (ไม่โดนสตัน)", Callback = function(v) AntiStun = v end})
 UtilTab:Toggle({Title = "Auto Dodge (หลบกระสุน)", Callback = function(v) AutoDodge = v end})
 UtilTab:Slider({
@@ -1065,16 +1071,19 @@ UtilTab:Slider({
     Value = {Min = 5, Max = 100, Default = HealthAlertHP},
     Callback = function(v) HealthAlertHP = v end
 })
-UtilTab:Toggle({Title = "Kill Notifier (แจ้งเมื่อฆ่า)", Callback = function(v)
-    KillNotifier = v
-    if v then watchKills() end
-end})
+UtilTab:Toggle({
+    Title = "Kill Notifier (แจ้งเมื่อฆ่า)",
+    Callback = function(v)
+        KillNotifier = v
+        if v then watchKills() end
+    end
+})
 
 UtilTab:Section({Title = "Respawn"})
 UtilTab:Toggle({Title = "Auto Respawn (เกิดอัตโนมัติ)", Callback = function(v) AutoRespawn = v end})
 
 -- ═══════════════════════════════════════════════════════
--- TAB: VISUAL / ESP
+-- TAB: VISUAL
 -- ═══════════════════════════════════════════════════════
 
 local VisualTab = Window:Tab({Title = "Visual", Icon = "eye"})
@@ -1099,13 +1108,16 @@ VisualTab:Slider({
 })
 
 VisualTab:Section({Title = "Lighting"})
-VisualTab:Toggle({Title = "Fullbright (สว่างทั้งแมพ)", Callback = function(v)
-    FullbrightEnabled = v
-    if not v then
-        Lighting.Brightness = OriginalBrightness
-        Lighting.ClockTime  = OriginalClockTime
+VisualTab:Toggle({
+    Title = "Fullbright (สว่างทั้งแมพ)",
+    Callback = function(v)
+        FullbrightEnabled = v
+        if not v then
+            Lighting.Brightness = OriginalBrightness
+            Lighting.ClockTime  = OriginalClockTime
+        end
     end
-end})
+})
 VisualTab:Slider({
     Title = "Brightness",
     Value = {Min = 0, Max = 5, Default = BrightnessVal},
