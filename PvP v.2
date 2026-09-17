@@ -24,9 +24,8 @@ local HttpService = game:GetService("HttpService")
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
---------------------------------------------------
 -- Global States & Variables
---------------------------------------------------
+
 local SilentAim   = false
 local CAMERA_LOCK = false
 local ESP_ENABLED = false
@@ -72,9 +71,8 @@ local IsReloading = false
 local LastShootTime = 0
 local IsShootingBurst = false
 
---------------------------------------------------
 -- Core Helper Functions
---------------------------------------------------
+
 local function isAlive(char)
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     return hum and hum.Health > 0
@@ -82,7 +80,7 @@ end
 
 local function isTeammate(p)
     if not TeamCheck then return false end
-    if not LocalPlayer.Team or not p.Team meant return false end
+    if not LocalPlayer.Team or not p.Team then return false end
     return p.Team == LocalPlayer.Team
 end
 
@@ -122,14 +120,10 @@ local function fastReload()
 
     if hum and tool then
         IsReloading = true
-        
-        -- รอเวลาตาม Slider (ถ้าปรับเหลือน้อย จะใช้เทคนิคสลับปืนไว Bypass Server Animation)
         task.wait(ReloadSpeedVal)
-        
         hum:UnequipTools()
         task.wait(0.05)
         hum:EquipTool(tool)
-        
         IsReloading = false
     end
 end
@@ -193,11 +187,11 @@ end
 local function BuildSoftBoob(char)
     DestroyBoobs()
     if not char or not char.Parent then return end
-    
+
     local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
     local head = char:FindFirstChild("Head")
     if not torso then return end
-    
+
     local skinCol = head and head.Color or torso.Color
     local pink1 = Color3.fromRGB(255, 130, 155)
     local pink2 = Color3.fromRGB(255, 80, 120)
@@ -218,7 +212,7 @@ local function BuildSoftBoob(char)
         w.Part1 = p
         w.C0 = cf
         w.Parent = p
-        
+
         table.insert(CreatedBoobParts, p)
         return p, w
     end
@@ -245,7 +239,7 @@ RunService.Heartbeat:Connect(function(dt)
             if LastHRPPos then
                 local delta = (pos - LastHRPPos)
                 local moveVel = hrp.CFrame:VectorToObjectSpace(delta / dt)
-                
+
                 local targetOff = Vector3.new(
                     math.clamp(-moveVel.X * 0.02, -0.4, 0.4),
                     math.clamp(-moveVel.Y * 0.03, -0.5, 0.5),
@@ -426,7 +420,7 @@ end)
 local function setupCharacterEvents(char)
     if not char then return end
     if BoobSettings.Enabled then BuildSoftBoob(char) end
-    
+
     local hum = char:WaitForChild("Humanoid", 3)
     if hum then
         hum.HealthChanged:Connect(function()
@@ -465,7 +459,7 @@ local function UpdateHitbox()
             if char and isAlive(char) and not isTeammate(p) then
                 local hrp = char:FindFirstChild("HumanoidRootPart")
                 local head = char:FindFirstChild("Head")
-                
+
                 if hrp then
                     if not OriginalSizes[hrp] then
                         OriginalSizes[hrp] = {Size = hrp.Size, Transparency = hrp.Transparency, CanCollide = hrp.CanCollide}
@@ -518,7 +512,7 @@ task.spawn(function()
                 if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") and not Players:GetPlayerFromCharacter(obj) then
                     local hum = obj:FindFirstChildOfClass("Humanoid")
                     local hrp = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Head")
-                    
+
                     if hum and hum.Health > 0 and hrp then
                         activeNPCs[obj] = true
                         if not NPC_CACHE[obj] then
@@ -617,9 +611,8 @@ end)
     ==================================================
 ]]
 
---------------------------------------------------
 -- UI Window Initialization (Dolly Hub Style)
---------------------------------------------------
+
 local Window = WindUI:CreateWindow({
     Title = "Dolly Hub",
     Subtitle = "ปลาตากแห้งสคริปต์ที่ดีที่สุด",
@@ -627,9 +620,8 @@ local Window = WindUI:CreateWindow({
     OpenButton = {Title = "Dolly Hub", Enabled = true}
 })
 
---------------------------------------------------
 -- TAB 1: AIMBOT & GUN MODIFIES
---------------------------------------------------
+
 local AimbotTab = Window:Tab({Title = "Aimbot", Icon = "target"})
 
 AimbotTab:Section({Title = "Aimbot"})
@@ -712,9 +704,8 @@ AimbotTab:Toggle({
     Callback = function(v) GodModeEnabled = v end
 })
 
---------------------------------------------------
 -- TAB 2: MISCELLANEOUS
---------------------------------------------------
+
 local MiscTab = Window:Tab({Title = "Miscellaneous", Icon = "more-horizontal"})
 
 MiscTab:Section({Title = "ESP Options"})
