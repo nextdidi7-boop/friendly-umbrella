@@ -927,5 +927,3 @@ Players.PlayerAdded:Connect(function(plr)
         end
     end)
 end)
-
-print("[L]nw boob system loaded — settings:", BoobSettings.Size, BoobSettings.Jiggle)
