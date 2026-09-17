@@ -1,6 +1,6 @@
 --[[
     ==================================================
-    [Dolly Hub PvP v3] [PART 1/4]
+    [Dolly Hub PvP v3.1] [PART 1/4]
     SERVICES · STATE · HELPERS · AIM ENGINE
     ==================================================
 ]]
@@ -44,7 +44,7 @@ local TargetPriority   = "Closest"
 local VisibleCheckOnly = true
 local WallbangEnabled  = false
 local StickyAim        = false
-local AimPart          = "Head" -- "Head" | "HumanoidRootPart"
+local AimPart          = "Head"
 
 -- Gun extras
 local TriggerBot        = false
@@ -52,9 +52,7 @@ local TriggerDelay      = 0.02
 local AutoScope         = false
 local NoRecoil          = false
 local NoSpread          = false
-local RapidFire         = false
 local FireRateVal       = 0.1
-local PreRapidFireRate  = 0.1
 local AutoSwitchTarget  = false
 local AutoReturnFire    = false
 local AutoShootEnabled  = false
@@ -97,17 +95,15 @@ local HIGHLIGHT_CACHE     = {}
 local NPC_CACHE           = {}
 local OriginalSizes       = {}
 local HookedTools         = {}
+local WatchedHumans       = {}
 local LastShootTime       = 0
 local LastTriggerTime     = 0
 local LastDodgeTime       = 0
 local LastTargetScan      = 0
+local LastReturnFire      = 0
 local IsShootingBurst     = false
+local ReloadToken         = 0
 
--- Anti-stun baseline (แยกจาก WalkSpeedVal)
-local ANTI_STUN_SPEED = 16
-local ANTI_STUN_JUMP  = 50
-
--- Drawings (สำหรับ unload)
 local DRAWINGS = {}
 
 -- ═══════════════════════════════════════════════════════
@@ -149,7 +145,7 @@ local function notify(title, text, dur)
 end
 
 local function trackDrawing(d)
-    table.insert(DRAWINGS, d)
+    if d then table.insert(DRAWINGS, d) end
     return d
 end
 
@@ -162,7 +158,8 @@ RayParams.FilterType  = Enum.RaycastFilterType.Blacklist
 RayParams.IgnoreWater = true
 
 local function isVisible(part, char)
-    if not VisibleCheckOnly and not WallbangEnabled then return true end
+    if not VisibleCheckOnly then return true end
+    if WallbangEnabled then return true end
     RayParams.FilterDescendantsInstances = {LocalPlayer.Character, char}
     local origin = Camera.CFrame.Position
     local dir    = part.Position - origin
@@ -184,9 +181,8 @@ local function facingMe(char)
 end
 
 function getTarget()
-    -- throttle: scan ทุก ~3 frames พอ
     local now = tick()
-    if now - LastTargetScan < 0.05 and CurrentTarget and CurrentTarget.Parent then
+    if now - LastTargetScan < 0.033 and CurrentTarget and CurrentTarget.Parent then
         return CurrentTarget, CurrentTargetData
     end
     LastTargetScan = now
@@ -209,7 +205,7 @@ function getTarget()
                         if sd < FOV then
                             local hum = char:FindFirstChildOfClass("Humanoid")
                             local vis = isVisible(aimPart, char)
-                            if vis or WallbangEnabled then
+                            if vis then
                                 table.insert(list, {
                                     head = aimPart, hrp = hrp, player = p, char = char,
                                     dist = dist, screenDist = sd,
@@ -225,7 +221,6 @@ function getTarget()
         end
     end
 
-    -- Sticky
     if StickyAim and StickyTarget and StickyTarget.Parent then
         local hum = StickyTarget.Parent:FindFirstChildOfClass("Humanoid")
         if hum and hum.Health > 0 then
@@ -276,10 +271,9 @@ local function clearESP(char)
     end
     clearHighlight(char)
 end
-
 --[[
     ==================================================
-    [Dolly Hub PvP v3] [PART 2/4]
+    [Dolly Hub PvP v3.1] [PART 2/4]
     GUN · RELOAD · HOOKS · UTILITY · NOTIFIER
     ==================================================
 ]]
@@ -306,11 +300,18 @@ local function fastReload()
     if not (hum and tool) then return end
 
     IsReloading = true
+    ReloadToken = ReloadToken + 1
+    local myToken = ReloadToken
+
     task.spawn(function()
         task.wait(ReloadSpeedVal)
+        if myToken ~= ReloadToken then IsReloading = false; return end
         pcall(function() hum:UnequipTools() end)
         task.wait(0.05)
-        pcall(function() hum:EquipTool(tool) end)
+        if myToken ~= ReloadToken then IsReloading = false; return end
+        if tool.Parent then
+            pcall(function() hum:EquipTool(tool) end)
+        end
         IsReloading = false
     end)
 end
@@ -376,7 +377,6 @@ local function applyRecoilSpread(tool)
     end
 end
 
--- AutoScope — toggle any BoolValue named scope/zoom
 local function handleAutoScope()
     if not AutoScope then return end
     local tool = getEquippedTool()
@@ -392,7 +392,7 @@ local function handleAutoScope()
 end
 
 -- ═══════════════════════════════════════════════════════
--- UTILITY: FLINCH / STUN / DODGE / ALERT / RESPAWN
+-- UTILITY
 -- ═══════════════════════════════════════════════════════
 
 local function applyAntiFlinch(char)
@@ -410,8 +410,8 @@ local function applyAntiStun(char)
     if not AntiStun then return end
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
-    if hum.WalkSpeed < ANTI_STUN_SPEED then hum.WalkSpeed = ANTI_STUN_SPEED end
-    if (hum.JumpPower or 0) < ANTI_STUN_JUMP then hum.JumpPower = ANTI_STUN_JUMP end
+    if hum.WalkSpeed < WalkSpeedVal then hum.WalkSpeed = WalkSpeedVal end
+    if (hum.JumpPower or 0) < 50 then hum.JumpPower = 50 end
 end
 
 local function doDodge()
@@ -447,8 +447,8 @@ local function setupCharUtility(char)
             notify("HP ต่ำ!", "HP: " .. math.floor(hp), 2)
         end
         if AutoReturnFire and getEquippedTool() and CurrentTarget then
-            if tick() - LastShootTime > FireRateVal then
-                LastShootTime = tick()
+            if tick() - LastReturnFire > 0.15 then
+                LastReturnFire = tick()
                 task.spawn(fireGun)
             end
         end
@@ -466,9 +466,10 @@ local function watchKills()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character then
             local hum = p.Character:FindFirstChildOfClass("Humanoid")
-            if hum and not hum:GetAttribute("DollyWatched") then
-                hum:SetAttribute("DollyWatched", true)
+            if hum and not WatchedHumans[hum] then
+                WatchedHumans[hum] = true
                 hum.Died:Connect(function()
+                    WatchedHumans[hum] = nil
                     if not KillNotifier then return end
                     local killer = hum:FindFirstChild("creator")
                     if killer and killer.Value == LocalPlayer then
@@ -480,15 +481,17 @@ local function watchKills()
     end
 end
 
--- Connections
 if LocalPlayer.Character then setupCharUtility(LocalPlayer.Character) end
-LocalPlayer.CharacterAdded:Connect(setupCharUtility)
+LocalPlayer.CharacterAdded:Connect(function(c)
+    setupCharUtility(c)
+    task.wait(1)
+    watchKills()
+end)
 Players.PlayerAdded:Connect(function(p)
     p.CharacterAdded:Connect(function() task.wait(1); watchKills() end)
 end)
 watchKills()
 
--- Cleanup OriginalSizes on leave/respawn
 Players.PlayerRemoving:Connect(function(p)
     local char = p.Character
     if char then
@@ -522,7 +525,6 @@ UserInputService.InputBegan:Connect(function(input, gp)
     end
 end)
 
--- Tool hook — existing + future
 local function scanTools(char)
     if not char then return end
     for _, c in ipairs(char:GetChildren()) do
@@ -535,7 +537,6 @@ end
 if LocalPlayer.Character then scanTools(LocalPlayer.Character) end
 LocalPlayer.CharacterAdded:Connect(scanTools)
 
--- Stepped loop
 RunService.Stepped:Connect(function()
     if GodModeEnabled and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -545,22 +546,33 @@ RunService.Stepped:Connect(function()
     handleAutoScope()
     applyAntiStun(LocalPlayer.Character)
 end)
-
 --[[
     ==================================================
-    [Dolly Hub PvP v3] [PART 3/4]
+    [Dolly Hub PvP v3.1] [PART 3/4]
     ESP · NPC · HITBOX · RENDER · LOW-PLAYER JOIN
     ==================================================
 ]]
 
-local FOVCircle = trackDrawing(Drawing.new("Circle"))
-FOVCircle.Thickness = 2
-FOVCircle.Filled    = false
-FOVCircle.Color     = Color3.fromRGB(255,255,0)
+local FOVCircle
+do
+    local ok, d = pcall(function() return Drawing.new("Circle") end)
+    if ok then
+        FOVCircle = trackDrawing(d)
+        FOVCircle.Thickness = 2
+        FOVCircle.Filled    = false
+        FOVCircle.Color     = Color3.fromRGB(255,255,0)
+    end
+end
 
-local AimLine = trackDrawing(Drawing.new("Line"))
-AimLine.Thickness = 2
-AimLine.Color     = Color3.fromRGB(255,0,0)
+local AimLine
+do
+    local ok, d = pcall(function() return Drawing.new("Line") end)
+    if ok then
+        AimLine = trackDrawing(d)
+        AimLine.Thickness = 2
+        AimLine.Color     = Color3.fromRGB(255,0,0)
+    end
+end
 
 local function UpdateHitbox()
     for _, p in ipairs(Players:GetPlayers()) do
@@ -618,7 +630,6 @@ RunService.Heartbeat:Connect(function()
     if HitboxEnabled or BigHeadEnabled then UpdateHitbox() end
 end)
 
--- NPC ESP scanner
 task.spawn(function()
     while task.wait(0.1) do
         if not ESP_NPC_ENABLED then
@@ -634,19 +645,23 @@ task.spawn(function()
                     if hum and hum.Health > 0 and hrp then
                         active[obj] = true
                         if not NPC_CACHE[obj] then
-                            local t = Drawing.new("Text")
-                            t.Center = true; t.Outline = true
-                            t.Font = 2; t.Size = 13
-                            t.Color = Color3.fromRGB(0, 255, 150)
-                            NPC_CACHE[obj] = t
+                            local ok, t = pcall(function() return Drawing.new("Text") end)
+                            if ok then
+                                t.Center = true; t.Outline = true
+                                t.Font = 2; t.Size = 13
+                                t.Color = Color3.fromRGB(0, 255, 150)
+                                NPC_CACHE[obj] = t
+                            end
                         end
-                        local pos, on = Camera:WorldToViewportPoint(hrp.Position)
-                        if on then
-                            NPC_CACHE[obj].Text = "[NPC] " .. obj.Name
-                            NPC_CACHE[obj].Position = Vector2.new(pos.X, pos.Y - 20)
-                            NPC_CACHE[obj].Visible = true
-                        else
-                            NPC_CACHE[obj].Visible = false
+                        if NPC_CACHE[obj] then
+                            local pos, on = Camera:WorldToViewportPoint(hrp.Position)
+                            if on then
+                                NPC_CACHE[obj].Text = "[NPC] " .. obj.Name
+                                NPC_CACHE[obj].Position = Vector2.new(pos.X, pos.Y - 20)
+                                NPC_CACHE[obj].Visible = true
+                            else
+                                NPC_CACHE[obj].Visible = false
+                            end
                         end
                     end
                 end
@@ -662,10 +677,16 @@ task.spawn(function()
 end)
 
 local function joinLowPlayerServer()
+    if not HttpService.HttpEnabled then
+        notify("Join", "HttpEnabled = false", 3); return
+    end
     local api = "https://games.roblox.com/v1/games/" .. game.PlaceId
         .. "/servers/Public?sortOrder=Asc&limit=100"
     local ok, result = pcall(function()
-        return HttpService:JSONDecode(game:HttpGet(api))
+        local req = (syn and syn.request) or (http and http.request) or http_request or request
+        if not req then return nil end
+        local res = req({Url = api, Method = "GET"})
+        return HttpService:JSONDecode(res.Body)
     end)
     if ok and result and result.data then
         for _, s in ipairs(result.data) do
@@ -680,11 +701,13 @@ end
 RunService.RenderStepped:Connect(function()
     local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
 
-    FOVCircle.Position = center
-    FOVCircle.Radius   = FOV
-    FOVCircle.Visible  = SilentAim or CAMERA_LOCK
+    if FOVCircle then
+        FOVCircle.Position = center
+        FOVCircle.Radius   = FOV
+        FOVCircle.Visible  = SilentAim or CAMERA_LOCK
+    end
+    if AimLine then AimLine.Visible = false end
 
-    AimLine.Visible = false
     CurrentTarget     = nil
     CurrentTargetData = nil
 
@@ -696,14 +719,13 @@ RunService.RenderStepped:Connect(function()
         cameraLookAtSmooth(CurrentTarget)
     end
 
-    if SilentAim and not CAMERA_LOCK and CurrentTarget then
+    if SilentAim and not CAMERA_LOCK and CurrentTarget and AimLine then
         local p = Camera:WorldToViewportPoint(CurrentTarget.Position)
         AimLine.From = center
         AimLine.To   = Vector2.new(p.X, p.Y)
         AimLine.Visible = true
     end
 
-    -- TriggerBot
     if TriggerBot and CurrentTarget and tick() - LastTriggerTime > TriggerDelay then
         if getEquippedTool() then
             LastTriggerTime = tick()
@@ -711,7 +733,6 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- Auto Shoot
     if AutoShootEnabled and CurrentTarget and getEquippedTool() then
         if tick() - LastShootTime >= FireRateVal then
             LastShootTime = tick()
@@ -719,16 +740,13 @@ RunService.RenderStepped:Connect(function()
         end
     end
 
-    -- Recoil / Spread
     local tool = getEquippedTool()
     if tool and (NoRecoil or NoSpread) then applyRecoilSpread(tool) end
 
-    -- Auto Switch Target
     if AutoSwitchTarget and StickyTarget and not StickyTarget.Parent then
         StickyTarget = nil
     end
 
-    -- ESP
     if ESP_ENABLED then
         for _, p in ipairs(Players:GetPlayers()) do
             local char = p.Character
@@ -739,22 +757,26 @@ RunService.RenderStepped:Connect(function()
                     local dist = (Camera.CFrame.Position - hrp.Position).Magnitude
                     if dist <= MaxDistance then
                         if not ESP_CACHE[char] then
-                            local t = Drawing.new("Text")
-                            t.Center = true; t.Outline = true
-                            t.Font = 2; t.Size = 14
-                            ESP_CACHE[char] = {Text = t}
+                            local ok, t = pcall(function() return Drawing.new("Text") end)
+                            if ok then
+                                t.Center = true; t.Outline = true
+                                t.Font = 2; t.Size = 14
+                                ESP_CACHE[char] = {Text = t}
+                            end
                         end
-                        local txt = ESP_CACHE[char].Text
-                        local pos, on = Camera:WorldToViewportPoint(hrp.Position)
-                        if on then
-                            txt.Text = p.Name .. " [" .. math.floor(dist) .. "m]"
-                            txt.Position = Vector2.new(pos.X, pos.Y - 28)
-                            txt.Color = (CurrentTarget and CurrentTarget:IsDescendantOf(char))
-                                and Color3.fromRGB(255,60,60)
-                                or Color3.fromRGB(255,255,255)
-                            txt.Visible = true
-                        else
-                            txt.Visible = false
+                        if ESP_CACHE[char] then
+                            local txt = ESP_CACHE[char].Text
+                            local pos, on = Camera:WorldToViewportPoint(hrp.Position)
+                            if on then
+                                txt.Text = p.Name .. " [" .. math.floor(dist) .. "m]"
+                                txt.Position = Vector2.new(pos.X, pos.Y - 28)
+                                txt.Color = (CurrentTarget and CurrentTarget:IsDescendantOf(char))
+                                    and Color3.fromRGB(255,60,60)
+                                    or Color3.fromRGB(255,255,255)
+                                txt.Visible = true
+                            else
+                                txt.Visible = false
+                            end
                         end
                     else
                         if ESP_CACHE[char] then ESP_CACHE[char].Text.Visible = false end
@@ -768,7 +790,6 @@ RunService.RenderStepped:Connect(function()
         for c in pairs(ESP_CACHE) do clearESP(c) end
     end
 
-    -- Rainbow ESP
     if RAINBOW_ESP then
         for _, p in ipairs(Players:GetPlayers()) do
             local char = p.Character
@@ -797,25 +818,21 @@ RunService.RenderStepped:Connect(function()
         for c in pairs(HIGHLIGHT_CACHE) do clearHighlight(c) end
     end
 
-    -- Dodge
     if AutoDodge then doDodge() end
 
-    -- WalkSpeed
     if WalkSpeedEnabled and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
         if hum then hum.WalkSpeed = WalkSpeedVal end
     end
 
-    -- Fullbright
     if FullbrightEnabled then
         Lighting.Brightness = BrightnessVal
         Lighting.ClockTime  = 12
     end
 end)
-
 --[[
     ==================================================
-    [Dolly Hub PvP v3] [PART 4/4]
+    [Dolly Hub PvP v3.1] [PART 4/4]
     UI — AIM · GUN · PVP UTILITY · VISUAL · MISC
     ==================================================
 ]]
@@ -827,10 +844,7 @@ local Window = WindUI:CreateWindow({
     OpenButton = {Title = "Dolly Hub", Enabled = true}
 })
 
--- ═══════════════════════════════════════════════════════
 -- TAB: AIM
--- ═══════════════════════════════════════════════════════
-
 local AimTab = Window:Tab({Title = "Aim", Icon = "target"})
 
 AimTab:Section({Title = "Aimbot"})
@@ -888,31 +902,4 @@ AimTab:Toggle({
     Callback = function(v) WallbangEnabled = v end
 })
 AimTab:Toggle({
-    Title = "Sticky Aim (ล็อคเป้าเดิมจนตาย)",
-    Callback = function(v) StickyAim = v end
-})
-AimTab:Toggle({
-    Title = "Team Check",
-    Default = true,
-    Callback = function(v) TeamCheck = v end
-})
-
--- ═══════════════════════════════════════════════════════
--- TAB: GUN
--- ═══════════════════════════════════════════════════════
-
-local GunTab = Window:Tab({Title = "Gun", Icon = "crosshair"})
-
-GunTab:Section({Title = "Firing"})
-GunTab:Toggle({
-    Title = "Trigger Bot (ยิงเมื่อเล็งโดน)",
-    Callback = function(v) TriggerBot = v end
-})
-GunTab:Slider({
-    Title = "Trigger Delay",
-    Value = {Min = 0.01, Max = 0.5, Default = TriggerDelay},
-    Step = 0.01,
-    Callback = function(v) TriggerDelay = v end
-})
-GunTab:Toggle({Title = "Auto Shoot
-
+    Title = "
