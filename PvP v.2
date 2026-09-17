@@ -598,8 +598,8 @@ local function getTarget()
                         closest, target = d, targetPart
                     end
           --[[
-    [PART 2/3] VISUALS & TARGETING LOOP
-    Dolly Hub | Drawing & Render Loop
+    [PART 2/3] VISUALS & TARGETING SYSTEM
+    Dolly Hub | Drawing & Target Acquisition Loop
 ]]
 
 local Players = game:GetService("Players")
@@ -608,7 +608,7 @@ local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
 --------------------------------------------------
--- Drawing Elements
+-- Drawing Visuals Initialization
 --------------------------------------------------
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Thickness = 2
@@ -620,9 +620,9 @@ AimLine.Thickness = 2
 AimLine.Color = Color3.fromRGB(255, 0, 0)
 
 --------------------------------------------------
--- Target Acquisition logic
+-- Target Acquisition Engine
 --------------------------------------------------
-local function getTarget()
+function _G.getTarget()
     local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
     local closest, target = math.huge, nil
 
@@ -649,20 +649,20 @@ local function getTarget()
 end
 
 --------------------------------------------------
--- Main Render Loop
+-- Main Render Stepped Loop
 --------------------------------------------------
 RunService.RenderStepped:Connect(function()
     local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
 
     FOVCircle.Position = center
-    FOVCircle.Radius = _G.FOV
-    FOVCircle.Visible = _G.CAMERA_LOCK
+    FOVCircle.Radius = _G.FOV or 200
+    FOVCircle.Visible = _G.CAMERA_LOCK or false
 
     AimLine.Visible = false
     _G.CurrentTarget = nil
 
     if _G.CAMERA_LOCK then
-        _G.CurrentTarget = getTarget()
+        _G.CurrentTarget = _G.getTarget()
         if _G.CurrentTarget then
             _G.cameraLookAt(_G.CurrentTarget)
             local p = Camera:WorldToViewportPoint(_G.CurrentTarget.Position)
@@ -673,8 +673,8 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 --[[
-    [PART 3/3] RAYFIELD UI CONTROLS
-    Dolly Hub | User Interface
+    [PART 3/3] USER INTERFACE
+    Dolly Hub | Rayfield Interface Controls
 ]]
 
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
@@ -688,7 +688,7 @@ local Window = Rayfield:CreateWindow({
 })
 
 --------------------------------------------------
--- TAB 1: COMBAT & GUN MODS
+-- COMBAT & GUN MODS TAB
 --------------------------------------------------
 local CombatTab = Window:CreateTab("Combat", 4483362458)
 
@@ -752,4 +752,4 @@ CombatTab:CreateToggle({
       _G.RapidFireEnabled = Value
       if Value then _G.BurstFireEnabled = false end
    end,
-end
+})
