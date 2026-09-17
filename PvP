@@ -1,265 +1,667 @@
 --[[
-    PvP Script v.3 — PART 1/4
-    Setup, Anti-Ban, GUI Library
---]]
+    PvP Script v.4 — รวมทุกฟีเจอร์ + ฟีเจอร์โกง PvP เพิ่มเติม
+    ภาษาไทย | WindUI | Anti-Ban | ครบทุกฟังก์ชัน
+    รวมจาก PvP v.3 และ PvP v.2 พร้อมอัปเกรด
+]]
+
+-- ==================================================
+-- [PART 1/6] SERVICES, VARIABLES & ANTI-BAN
+-- ==================================================
+
+local WindUI
+do
+    local ok, result = pcall(function()
+        return require("./src/Init")
+    end)
+    WindUI = ok and result or loadstring(game:HttpGet(
+        "https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"
+    ))()
+end
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local Lighting = game:GetService("Lighting")
+local TeleportService = game:GetService("TeleportService")
+local HttpService = game:GetService("HttpService")
 local Workspace = game:GetService("Workspace")
+local VirtualUser = game:GetService("VirtualUser")
 local Camera = Workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 local Mouse = LocalPlayer:GetMouse()
 
 --// ANTI-BAN LAYER
-local AntiBan = {}
 do
-    AntiBan.OldNamecall = nil
-    AntiBan.OldIndex = nil
-
-    AntiBan.OldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local OldNamecall
+    OldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
         local method = getnamecallmethod()
         if method == "Kick" and self == LocalPlayer then
             return
         end
-        return AntiBan.OldNamecall(self, ...)
+        return OldNamecall(self, ...)
     end)
 
-    AntiBan.OldIndex = hookmetamethod(game, "__index", function(self, key)
+    local OldIndex
+    OldIndex = hookmetamethod(game, "__index", function(self, key)
         if self == LocalPlayer and (key == "WalkSpeed" or key == "JumpPower") then
-            return AntiBan.OldIndex(self, key)
+            return OldIndex(self, key)
         end
-        return AntiBan.OldIndex(self, key)
+        return OldIndex(self, key)
     end)
 
     pcall(function()
         LocalPlayer.Idled:Connect(function()
-            game:GetService("VirtualUser"):Button2Down(Vector2.new(0,0), Camera.CFrame)
+            VirtualUser:Button2Down(Vector2.new(0,0), Camera.CFrame)
             task.wait(1)
-            game:GetService("VirtualUser"):Button2Up(Vector2.new(0,0), Camera.CFrame)
+            VirtualUser:Button2Up(Vector2.new(0,0), Camera.CFrame)
         end)
     end)
 end
 
---// CONFIG
-local Config = {
-    Invisible = false,
-    HeadInGround = false,
-    RapidFire = false,
-    FastReload = false,
-    ItemVacuum = false,
-    SpeedHack = false,
-    SpeedValue = 50,
-    JumpHack = false,
-    JumpValue = 120,
-    NoClip = false,
-    AimAssist = false,
-    ESP = false,
-    RapidFireDelay = 0.01,
-    FastReloadSpeed = 0.1,
+--// GLOBAL STATES
+local SilentAim = false
+local CAMERA_LOCK = false
+local ESP_ENABLED = false
+local RAINBOW_ESP = false
+local ESP_NPC_ENABLED = false
+local TeamCheck = true
+local MaxDistance = 600
+local FOV = 120
+local CurrentTarget = nil
+local ESP_CACHE = {}
+local HIGHLIGHT_CACHE = {}
+local NPC_CACHE = {}
+
+local WalkSpeedVal = 16
+local WalkSpeedEnabled = false
+local InfiniteJumpEnabled = false
+local FlyEnabled = false
+local FlySpeed = 50
+local NoClipEnabled = false
+
+local BrightnessVal = 1
+local FullbrightEnabled = false
+local OriginalBrightness = Lighting.Brightness
+local OriginalClockTime = Lighting.ClockTime
+
+local HitboxEnabled = false
+local HitboxSize = 10
+local BigHeadEnabled = false
+local BigHeadSize = 5
+local OriginalSizes = {}
+
+local FireRateVal = 0.1
+local AutoReturnFire = false
+local AutoShootEnabled = false
+local BurstTwoEnabled = false
+local GodModeEnabled = false
+local AutoReloadEnabled = false
+local ReloadSpeedVal = 0.2
+local IsReloading = false
+local LastShootTime = 0
+local IsShootingBurst = false
+local InfiniteAmmoEnabled = false
+local NoRecoilEnabled = false
+local WallBangEnabled = false
+
+-- PvP Cheats
+local KillAuraEnabled = false
+local KillAuraRange = 20
+local DamageAuraEnabled = false
+local DamageAuraRange = 30
+local AutoParryEnabled = false
+local AntiFlingEnabled = false
+local AntiVoidEnabled = false
+local AutoDodgeEnabled = false
+local InstantKillEnabled = false
+local FreezePlayerEnabled = false
+local TargetPlayer = nil
+
+-- Boob System
+local BoobSettings = {
+    Enabled = false,
+    Stiffness = 12,
+    Damping = 0.15,
+    Size = 1.0
 }
+local CreatedBoobParts = {}
+local LeftMeshWeld, RightMeshWeld = nil, nil
+local BaseLeftC0 = CFrame.new(-0.42, 0.1, -0.52)
+local BaseRightC0 = CFrame.new(0.42, 0.1, -0.52)
+local PhysPos = Vector3.new(0,0,0)
+local PhysVel = Vector3.new(0,0,0)
+local LastHRPPos = nil
 
---// GUI
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "PvP_Script_v3"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = game:GetService("CoreGui")
-
-local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 320, 0, 480)
-MainFrame.Position = UDim2.new(0, 20, 0, 100)
-MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Draggable = true
-MainFrame.Parent = ScreenGui
-
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 8)
-UICorner.Parent = MainFrame
-
-local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, 0, 0, 36)
-Title.BackgroundColor3 = Color3.fromRGB(35, 35, 42)
-Title.Text = "PvP Script v.3 | Anti-Ban"
-Title.TextColor3 = Color3.fromRGB(255, 255, 255)
-Title.Font = Enum.Font.GothamBold
-Title.TextSize = 14
-Title.Parent = MainFrame
-
-local TitleCorner = Instance.new("UICorner")
-TitleCorner.CornerRadius = UDim.new(0, 8)
-TitleCorner.Parent = Title
-
-local Scroll = Instance.new("ScrollingFrame")
-Scroll.Size = UDim2.new(1, -10, 1, -46)
-Scroll.Position = UDim2.new(0, 5, 0, 41)
-Scroll.BackgroundTransparency = 1
-Scroll.BorderSizePixel = 0
-Scroll.ScrollBarThickness = 4
-Scroll.CanvasSize = UDim2.new(0, 0, 0, 800)
-Scroll.Parent = MainFrame
-
-local Layout = Instance.new("UIListLayout")
-Layout.Padding = UDim.new(0, 6)
-Layout.SortOrder = Enum.SortOrder.LayoutOrder
-Layout.Parent = Scroll
-
---// HELPERS
-local function makeButton(text, callback)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, -10, 0, 34)
-    btn.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-    btn.Text = text
-    btn.TextColor3 = Color3.fromRGB(220, 220, 220)
-    btn.Font = Enum.Font.Gotham
-    btn.TextSize = 13
-    btn.Parent = Scroll
-
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 6)
-    c.Parent = btn
-
-    btn.MouseButton1Click:Connect(function()
-        callback(btn)
-    end)
-    return btn
+--// HELPER FUNCTIONS
+local function isAlive(char)
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    return hum and hum.Health > 0
 end
 
-local function makeToggle(text, key, callback)
-    local btn = makeButton(text .. ": OFF", function(b)
-        Config[key] = not Config[key]
-        b.Text = text .. ": " .. (Config[key] and "ON" or "OFF")
-        b.BackgroundColor3 = Config[key] and Color3.fromRGB(60, 120, 60) or Color3.fromRGB(45, 45, 55)
-        if callback then callback(Config[key]) end
-    end)
-    return btn
+local function isTeammate(p)
+    if not TeamCheck then return false end
+    if not LocalPlayer.Team or not p.Team then return false end
+    return p.Team == LocalPlayer.Team
 end
---[[
-    PvP Script v.3 — PART 2/4
-    Core Features: Invisible, Head In Ground,
-    Rapid Fire, Fast Reload, Item Vacuum
---]]
 
---// FEATURE: INVISIBLE
-local function setInvisible(state)
-    for _, part in ipairs(LocalPlayer.Character:GetDescendants()) do
-        if part:IsA("BasePart") then
-            part.LocalTransparencyModifier = state and 1 or 0
-            part.Transparency = state and 1 or part.Transparency
+local function rainbowColor(speed)
+    local t = tick() * speed
+    return Color3.fromHSV(t % 1, 1, 1)
+end
+
+local function isCharValid(char)
+    return char and char.Parent and char:IsDescendantOf(Workspace)
+end
+
+local function getEquippedTool()
+    if LocalPlayer.Character then
+        return LocalPlayer.Character:FindFirstChildOfClass("Tool")
+    end
+    return nil
+end
+
+local function getHRP(char)
+    return char and char:FindFirstChild("HumanoidRootPart")
+end
+-- ==================================================
+-- [PART 2/6] GUN SYSTEM & COMBAT MODIFIES
+-- ==================================================
+
+local function fireGun()
+    if IsReloading then return end
+    local tool = getEquippedTool()
+    if tool then
+        tool:Activate()
+        task.wait(math.clamp(FireRateVal, 0.05, 1))
+        tool:Deactivate()
+    end
+end
+
+local function fastReload()
+    if IsReloading then return end
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local tool = getEquippedTool()
+    if hum and tool then
+        IsReloading = true
+        task.wait(ReloadSpeedVal)
+        hum:UnequipTools()
+        task.wait(0.05)
+        hum:EquipTool(tool)
+        IsReloading = false
+    end
+end
+
+local function handleAutoReload()
+    if not AutoReloadEnabled or IsReloading then return end
+    local tool = getEquippedTool()
+    if tool then
+        for _, v in ipairs(tool:GetDescendants()) do
+            if v:IsA("IntValue") or v:IsA("NumberValue") then
+                local name = v.Name:lower()
+                if (name:find("ammo") or name:find("clip") or name:find("bullet")) and v.Value <= 0 then
+                    fastReload()
+                    break
+                end
+            end
         end
     end
-    if state then
-        LocalPlayer.CharacterAdded:Connect(function(char)
-            task.wait(0.5)
-            for _, part in ipairs(char:GetDescendants()) do
-                if part:IsA("BasePart") then
-                    part.Transparency = 1
+end
+
+local function handleInfiniteAmmo()
+    if not InfiniteAmmoEnabled then return end
+    local tool = getEquippedTool()
+    if tool then
+        for _, v in ipairs(tool:GetDescendants()) do
+            if v:IsA("IntValue") or v:IsA("NumberValue") then
+                local name = v.Name:lower()
+                if name:find("ammo") or name:find("clip") or name:find("bullet") or name:find("mag") then
+                    if v.Value < 30 then v.Value = 999 end
                 end
             end
-        end)
+        end
     end
 end
 
---// FEATURE: HEAD IN GROUND
-local function headInGround(state)
+local function handleNoRecoil()
+    if not NoRecoilEnabled then return end
+    local tool = getEquippedTool()
+    if tool then
+        for _, v in ipairs(tool:GetDescendants()) do
+            if v:IsA("NumberValue") or v:IsA("IntValue") then
+                local name = v.Name:lower()
+                if name:find("recoil") or name:find("spread") or name:find("kick") then
+                    v.Value = 0
+                end
+            end
+        end
+    end
+end
+
+local function handleWallBang()
+    if not WallBangEnabled then return end
+    -- ทำให้กระสุนทะลุกำแพง (generic approach)
+    local tool = getEquippedTool()
+    if tool then
+        for _, v in ipairs(tool:GetDescendants()) do
+            if v:IsA("NumberValue") or v:IsA("BoolValue") then
+                local name = v.Name:lower()
+                if name:find("wall") or name:find("penetrat") or name:find("pierce") then
+                    if v:IsA("BoolValue") then v.Value = true
+                    else v.Value = 999 end
+                end
+            end
+        end
+    end
+end
+
+-- ==================================================
+-- [PART 3/6] VISUAL SYSTEM (ESP, HIGHLIGHT, NPC)
+-- ==================================================
+
+local function clearHighlight(char)
+    if HIGHLIGHT_CACHE[char] then
+        pcall(function() HIGHLIGHT_CACHE[char]:Destroy() end)
+        HIGHLIGHT_CACHE[char] = nil
+    end
+end
+
+local function clearESP(char)
+    local cache = ESP_CACHE[char]
+    if cache then
+        pcall(function()
+            if cache.Text then
+                cache.Text.Visible = false
+                cache.Text:Remove()
+            end
+        end)
+        ESP_CACHE[char] = nil
+    end
+    clearHighlight(char)
+end
+
+local function ESP_SYSTEM()
+    if not ESP_ENABLED then
+        for char,_ in pairs(ESP_CACHE) do clearESP(char) end
+        return
+    end
+    for _,p in ipairs(Players:GetPlayers()) do
+        local char = p.Character
+        if p ~= LocalPlayer and char and isCharValid(char) and isAlive(char) and not isTeammate(p) then
+            local hrp = getHRP(char)
+            if not hrp then clearESP(char) continue end
+            local dist = (Camera.CFrame.Position - hrp.Position).Magnitude
+            if dist > MaxDistance then
+                if ESP_CACHE[char] then ESP_CACHE[char].Text.Visible = false end
+                continue
+            end
+            if not ESP_CACHE[char] then
+                local t = Drawing.new("Text")
+                t.Center = true
+                t.Outline = true
+                t.Font = 2
+                t.Size = 14
+                ESP_CACHE[char] = {Text = t}
+            end
+            local txt = ESP_CACHE[char].Text
+            local pos, on = Camera:WorldToViewportPoint(hrp.Position)
+            if on then
+                txt.Text = p.Name.." ["..math.floor(dist).."m]"
+                txt.Position = Vector2.new(pos.X, pos.Y - 28)
+                txt.Color = (CurrentTarget and CurrentTarget:IsDescendantOf(char)) and Color3.fromRGB(255,60,60) or Color3.fromRGB(255,255,255)
+                txt.Visible = true
+            else
+                txt.Visible = false
+            end
+        else
+            if char then clearESP(char) end
+        end
+    end
+end
+
+local function RAINBOW_ESP_SYSTEM()
+    if not RAINBOW_ESP then
+        for char,_ in pairs(HIGHLIGHT_CACHE) do clearHighlight(char) end
+        return
+    end
+    for _,p in ipairs(Players:GetPlayers()) do
+        local char = p.Character
+        if p ~= LocalPlayer and char and isCharValid(char) and isAlive(char) and not isTeammate(p) then
+            local hrp = getHRP(char)
+            if not hrp or (Camera.CFrame.Position - hrp.Position).Magnitude > MaxDistance then
+                clearHighlight(char)
+                continue
+            end
+            if not HIGHLIGHT_CACHE[char] then
+                local h = Instance.new("Highlight")
+                h.Adornee = char
+                h.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+                h.FillTransparency = 1
+                h.OutlineTransparency = 0
+                h.Parent = Workspace
+                HIGHLIGHT_CACHE[char] = h
+            end
+            HIGHLIGHT_CACHE[char].OutlineColor = rainbowColor(0.25)
+        else
+            if char then clearHighlight(char) end
+        end
+    end
+end
+
+-- NPC Scanner
+task.spawn(function()
+    while task.wait(0.1) do
+        if not ESP_NPC_ENABLED then
+            for model, textObj in pairs(NPC_CACHE) do pcall(function() textObj:Remove() end) end
+            NPC_CACHE = {}
+        else
+            local activeNPCs = {}
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") and not Players:GetPlayerFromCharacter(obj) then
+                    local hum = obj:FindFirstChildOfClass("Humanoid")
+                    local hrp = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Head")
+                    if hum and hum.Health > 0 and hrp then
+                        activeNPCs[obj] = true
+                        if not NPC_CACHE[obj] then
+                            local t = Drawing.new("Text")
+                            t.Center = true
+                            t.Outline = true
+                            t.Font = 2
+                            t.Size = 13
+                            t.Color = Color3.fromRGB(0, 255, 150)
+                            NPC_CACHE[obj] = t
+                        end
+                        local pos, on = Camera:WorldToViewportPoint(hrp.Position)
+                        if on then
+                            NPC_CACHE[obj].Text = "[NPC] " .. obj.Name
+                            NPC_CACHE[obj].Position = Vector2.new(pos.X, pos.Y - 20)
+                            NPC_CACHE[obj].Visible = true
+                        else
+                            NPC_CACHE[obj].Visible = false
+                        end
+                    end
+                end
+            end
+            for model, textObj in pairs(NPC_CACHE) do
+                if not activeNPCs[model] then
+                    pcall(function() textObj:Remove() end)
+                    NPC_CACHE[model] = nil
+                end
+            end
+        end
+    end
+end)
+-- ==================================================
+-- [PART 4/6] TARGETING, PVP CHEATS & MOVEMENT
+-- ==================================================
+
+-- Raycasting
+local RayParams = RaycastParams.new()
+RayParams.FilterType = Enum.RaycastFilterType.Blacklist
+RayParams.IgnoreWater = true
+
+local function isVisible(part, char)
+    RayParams.FilterDescendantsInstances = {LocalPlayer.Character, char}
+    local origin = Camera.CFrame.Position
+    local dir = part.Position - origin
+    return not Workspace:Raycast(origin, dir, RayParams)
+end
+
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 2
+FOVCircle.Filled = false
+FOVCircle.Color = Color3.fromRGB(255,255,0)
+
+local AimLine = Drawing.new("Line")
+AimLine.Thickness = 2
+AimLine.Color = Color3.fromRGB(255,0,0)
+
+local function getTarget()
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    local closest, target = math.huge, nil
+    for _,p in ipairs(Players:GetPlayers()) do
+        local char = p.Character
+        if p ~= LocalPlayer and char and isAlive(char) and not isTeammate(p) then
+            local head = char:FindFirstChild("Head")
+            local hrp = char:FindFirstChild("HumanoidRootPart")
+            if head and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= MaxDistance and isVisible(head, char) then
+                local s, on = Camera:WorldToViewportPoint(head.Position)
+                if on then
+                    local d = (Vector2.new(s.X,s.Y) - center).Magnitude
+                    if d < FOV and d < closest then
+                        closest, target = d, head
+                    end
+                end
+            end
+        end
+    end
+    return target
+end
+
+local function cameraLookAt(part)
+    if not part then return end
+    Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
+end
+
+-- PvP CHEATS
+
+-- Kill Aura: ยิงทุกคนในระยะ
+local function KillAura()
+    if not KillAuraEnabled then return end
+    local char = LocalPlayer.Character
+    local hrp = getHRP(char)
+    if not hrp then return end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and isAlive(p.Character) and not isTeammate(p) then
+            local targetHRP = getHRP(p.Character)
+            if targetHRP and (targetHRP.Position - hrp.Position).Magnitude <= KillAuraRange then
+                if tick() - LastShootTime >= FireRateVal then
+                    LastShootTime = tick()
+                    fireGun()
+                end
+            end
+        end
+    end
+end
+
+-- Damage Aura: ใช้ RemoteEvent ยิง damage
+local function DamageAura()
+    if not DamageAuraEnabled then return end
+    local char = LocalPlayer.Character
+    local hrp = getHRP(char)
+    if not hrp then return end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and isAlive(p.Character) and not isTeammate(p) then
+            local targetHRP = getHRP(p.Character)
+            if targetHRP and (targetHRP.Position - hrp.Position).Magnitude <= DamageAuraRange then
+                -- สแกนหา RemoteEvent ที่เกี่ยวกับ damage
+                for _, remote in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
+                    if remote:IsA("RemoteEvent") then
+                        local name = remote.Name:lower()
+                        if name:find("damage") or name:find("hit") or name:find("attack") or name:find("hurt") then
+                            pcall(function()
+                                remote:FireServer(p.Character, 100)
+                            end)
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- Auto Parry: ตรวจจับการโจมตีแล้ว parry
+local function AutoParry()
+    if not AutoParryEnabled then return end
     local char = LocalPlayer.Character
     if not char then return end
-    local hrp = char:FindFirstChild("HumanoidRootPart")
-    local head = char:FindFirstChild("Head")
-    if state then
-        if hrp then hrp.CFrame = hrp.CFrame * CFrame.new(0, -3, 0) end
-        if head then head.CFrame = head.CFrame * CFrame.new(0, -3, 0) end
-    else
-        if hrp then hrp.CFrame = hrp.CFrame * CFrame.new(0, 3, 0) end
-    end
-end
-
---// FEATURE: RAPID FIRE
-local rapidFireConn
-local function rapidFire(state)
-    if rapidFireConn then rapidFireConn:Disconnect() rapidFireConn = nil end
-    if state then
-        rapidFireConn = RunService.RenderStepped:Connect(function()
-            local tool = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
-            if tool and Mouse.Button1Down then
-                tool:Activate()
+    -- ตรวจจับ animation หรือ tool ของศัตรูที่เข้ามาใกล้
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and isAlive(p.Character) and not isTeammate(p) then
+            local tool = p.Character:FindFirstChildOfClass("Tool")
+            local hrp = getHRP(p.Character)
+            local myHRP = getHRP(char)
+            if tool and hrp and myHRP and (hrp.Position - myHRP.Position).Magnitude <= 15 then
+                -- พยายาม parry
+                local myTool = getEquippedTool()
+                if myTool and myTool:FindFirstChild("Parry") then
+                    pcall(function() myTool.Parry:FireServer() end)
+                end
+                -- หรือกดปุ่ม parry
+                pcall(function()
+                    VirtualUser:Button1Down(Vector2.new(0,0), Camera.CFrame)
+                    task.wait(0.05)
+                    VirtualUser:Button1Up(Vector2.new(0,0), Camera.CFrame)
+                end)
             end
-        end)
+        end
     end
 end
 
---// FEATURE: FAST RELOAD
-local fastReloadConn
-local function fastReload(state)
-    if fastReloadConn then fastReloadConn:Disconnect() fastReloadConn = nil end
-    if state then
-        fastReloadConn = RunService.Heartbeat:Connect(function()
-            local char = LocalPlayer.Character
-            if not char then return end
-            local tool = char:FindFirstChildOfClass("Tool")
-            if tool then
-                for _, v in ipairs(tool:GetDescendants()) do
-                    if v:IsA("NumberValue") and (v.Name:lower():find("reload") or v.Name:lower():find("cooldown")) then
-                        v.Value = 0
+-- Anti-Fling: ป้องกันการถูก fling
+local function AntiFling()
+    if not AntiFlingEnabled then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = getHRP(char)
+    if hrp then
+        -- ตรวจสอบความเร็วที่ผิดปกติ
+        local vel = hrp.AssemblyLinearVelocity
+        if vel.Magnitude > 500 then
+            hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+            hrp.CFrame = CFrame.new(hrp.Position)
+        end
+    end
+end
+
+-- Anti-Void: ป้องกันการตก void
+local function AntiVoid()
+    if not AntiVoidEnabled then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = getHRP(char)
+    if hrp and hrp.Position.Y < -50 then
+        hrp.CFrame = CFrame.new(hrp.Position.X, 50, hrp.Position.Z)
+        hrp.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+    end
+end
+
+-- Auto Dodge: หลบการโจมตี
+local function AutoDodge()
+    if not AutoDodgeEnabled then return end
+    local char = LocalPlayer.Character
+    if not char then return end
+    local hrp = getHRP(char)
+    if not hrp then return end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and isAlive(p.Character) and not isTeammate(p) then
+            local targetHRP = getHRP(p.Character)
+            local tool = p.Character:FindFirstChildOfClass("Tool")
+            if targetHRP and tool and (targetHRP.Position - hrp.Position).Magnitude <= 20 then
+                -- หลบไปด้านข้าง
+                local dodgeDir = (hrp.Position - targetHRP.Position).Unit
+                local rightDir = Vector3.new(-dodgeDir.Z, 0, dodgeDir.X)
+                hrp.CFrame = hrp.CFrame + rightDir * 5
+            end
+        end
+    end
+end
+
+-- Instant Kill: พยายาม kill ทันที
+local function InstantKill()
+    if not InstantKillEnabled then return end
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and isAlive(p.Character) and not isTeammate(p) then
+            local hum = p.Character:FindFirstChildOfClass("Humanoid")
+            if hum then
+                -- ลองใช้ RemoteEvent
+                for _, remote in ipairs(game:GetService("ReplicatedStorage"):GetDescendants()) do
+                    if remote:IsA("RemoteEvent") then
+                        local name = remote.Name:lower()
+                        if name:find("damage") or name:find("kill") or name:find("hit") then
+                            pcall(function()
+                                remote:FireServer(p.Character, hum.MaxHealth * 10)
+                            end)
+                        end
                     end
                 end
             end
-        end)
+        end
     end
 end
 
---// FEATURE: ITEM VACUUM
-local vacuumConn
-local function itemVacuum(state)
-    if vacuumConn then vacuumConn:Disconnect() vacuumConn = nil end
-    if state then
-        vacuumConn = RunService.Heartbeat:Connect(function()
-            local char = LocalPlayer.Character
-            if not char then return end
-            local hrp = char:FindFirstChild("HumanoidRootPart")
-            if not hrp then return end
-            for _, v in ipairs(Workspace:GetDescendants()) do
-                if v:IsA("BasePart") and v.Name ~= "HumanoidRootPart" then
-                    local dist = (v.Position - hrp.Position).Magnitude
-                    if dist < 50 and dist > 2 then
-                        pcall(function()
-                            v.CFrame = hrp.CFrame
-                        end)
-                    end
-                end
-            end
-        end)
+-- Freeze Player: แช่แข็งศัตรู
+local function FreezePlayer()
+    if not FreezePlayerEnabled or not TargetPlayer then return end
+    local char = TargetPlayer.Character
+    if char then
+        local hrp = getHRP(char)
+        if hrp then
+            hrp.Anchored = true
+        end
     end
 end
---[[
-    PvP Script v.3 — PART 3/4
-    Movement + Combat: Speed, Jump, NoClip,
-    Aim Assist, ESP
---]]
 
---// FEATURE: SPEED
-local function applySpeed(state)
+-- Teleport to Player
+local function teleportToPlayer(targetName)
+    local target = Players:FindFirstChild(targetName)
+    if target and target.Character then
+        local targetHRP = getHRP(target.Character)
+        local myHRP = getHRP(LocalPlayer.Character)
+        if targetHRP and myHRP then
+            myHRP.CFrame = targetHRP.CFrame + Vector3.new(0, 3, 0)
+        end
+    end
+end
+
+-- Bring Player
+local function bringPlayer(targetName)
+    local target = Players:FindFirstChild(targetName)
+    if target and target.Character then
+        local targetHRP = getHRP(target.Character)
+        local myHRP = getHRP(LocalPlayer.Character)
+        if targetHRP and myHRP then
+            targetHRP.CFrame = myHRP.CFrame + Vector3.new(0, 3, 0)
+        end
+    end
+end
+
+-- MOVEMENT
+
+local function applySpeed()
     local char = LocalPlayer.Character
-    if char and char:FindFirstChildOfClass("Humanoid") then
-        char.Humanoid.WalkSpeed = state and Config.SpeedValue or 16
+    if char then
+        local hum = char:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.WalkSpeed = WalkSpeedEnabled and WalkSpeedVal or 16
+        end
     end
 end
 
---// FEATURE: JUMP
-local function applyJump(state)
+local function applyFly()
+    if not FlyEnabled then return end
     local char = LocalPlayer.Character
-    if char and char:FindFirstChildOfClass("Humanoid") then
-        char.Humanoid.JumpPower = state and Config.JumpValue or 50
-        char.Humanoid.UseJumpPower = true
+    if not char then return end
+    local hrp = getHRP(char)
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hrp or not hum then return end
+    hum.PlatformStand = true
+    local moveDir = Vector3.new(0, 0, 0)
+    if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + Camera.CFrame.LookVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - Camera.CFrame.LookVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - Camera.CFrame.RightVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + Camera.CFrame.RightVector end
+    if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+    if moveDir.Magnitude > 0 then
+        hrp.CFrame = hrp.CFrame + moveDir.Unit * FlySpeed * (1/60)
     end
 end
 
---// FEATURE: NOCLIP
 local noclipConn
-local function noclip(state)
+local function applyNoClip()
     if noclipConn then noclipConn:Disconnect() noclipConn = nil end
-    if state then
+    if NoClipEnabled then
         noclipConn = RunService.Stepped:Connect(function()
             local char = LocalPlayer.Character
             if char then
@@ -273,161 +675,257 @@ local function noclip(state)
     end
 end
 
---// FEATURE: AIM ASSIST
-local aimConn
-local function aimAssist(state)
-    if aimConn then aimConn:Disconnect() aimConn = nil end
-    if state then
-        aimConn = RunService.RenderStepped:Connect(function()
-            local closest, closestDist = nil, math.huge
-            for _, plr in ipairs(Players:GetPlayers()) do
-                if plr ~= LocalPlayer and plr.Character then
-                    local head = plr.Character:FindFirstChild("Head")
-                    local hrp = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                    if head and hrp then
-                        local dist = (head.Position - hrp.Position).Magnitude
-                        if dist < closestDist and dist < 300 then
-                            closest, closestDist = head, dist
+-- HITBOX & BIG HEAD
+
+local function UpdateHitbox()
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            local char = p.Character
+            if char and isAlive(char) and not isTeammate(p) then
+                local hrp = getHRP(char)
+                local head = char:FindFirstChild("Head")
+                if hrp then
+                    if not OriginalSizes[hrp] then
+                        OriginalSizes[hrp] = {Size = hrp.Size, Transparency = hrp.Transparency, CanCollide = hrp.CanCollide}
+                    end
+                    if HitboxEnabled then
+                        hrp.Size = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
+                        hrp.Transparency = 0.7
+                        hrp.Color = Color3.fromRGB(255, 170, 0)
+                        hrp.Material = Enum.Material.SmoothPlastic
+                        hrp.CanCollide = false
+                    else
+                        if OriginalSizes[hrp] then
+                            hrp.Size = OriginalSizes[hrp].Size
+                            hrp.Transparency = OriginalSizes[hrp].Transparency
+                            hrp.CanCollide = OriginalSizes[hrp].CanCollide
+                        end
+                    end
+                end
+                if head then
+                    if not OriginalSizes[head] then
+                        OriginalSizes[head] = {Size = head.Size, Transparency = head.Transparency, CanCollide = head.CanCollide}
+                    end
+                    if BigHeadEnabled then
+                        head.Size = Vector3.new(BigHeadSize, BigHeadSize, BigHeadSize)
+                        head.Transparency = 0.5
+                        head.CanCollide = false
+                    else
+                        if OriginalSizes[head] then
+                            head.Size = OriginalSizes[head].Size
+                            head.Transparency = OriginalSizes[head].Transparency
+                            head.CanCollide = OriginalSizes[head].CanCollide
                         end
                     end
                 end
             end
-            if closest and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2) then
-                Camera.CFrame = CFrame.new(Camera.CFrame.Position, closest.Position)
+        end
+    end
+end
+-- ==================================================
+-- [PART 5/6] BOOB SYSTEM, CHARACTER EVENTS & MAIN LOOP
+-- ==================================================
+
+local function DestroyBoobs()
+    for _, v in ipairs(CreatedBoobParts) do
+        if v and v.Parent then pcall(function() v:Destroy() end) end
+    end
+    CreatedBoobParts = {}
+    LeftMeshWeld, RightMeshWeld = nil, nil
+end
+
+local function BuildSoftBoob(char)
+    DestroyBoobs()
+    if not char or not char.Parent then return end
+    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    local head = char:FindFirstChild("Head")
+    if not torso then return end
+    local skinCol = head and head.Color or torso.Color
+    local pink1 = Color3.fromRGB(255, 130, 155)
+    local pink2 = Color3.fromRGB(255, 80, 120)
+    local s = BoobSettings.Size
+    local function createSphere(cf, size, col, parentWeld)
+        local p = Instance.new("Part")
+        p.Shape = Enum.PartType.Ball
+        p.Size = size
+        p.Color = col
+        p.Material = Enum.Material.SmoothPlastic
+        p.CanCollide = false
+        p.Massless = true
+        p.Parent = char
+        local w = Instance.new
+-- ==================================================
+-- [PART 6/6] BOOB SYSTEM (CONT.) — CHARACTER EVENTS & MAIN LOOP
+-- ==================================================
+
+        local w = Instance.new("Weld")
+        w.Part0 = torso
+        w.Part1 = p
+        w.C0 = torso.CFrame:Inverse() * cf
+        w.Parent = p
+
+        if parentWeld then parentWeld(p, w) end
+
+        table.insert(CreatedBoobParts, p)
+        return p, w
+    end
+
+    local baseOffset = Vector3.new(0, 0.35, -0.55)
+    local spread = Vector3.new(0.42, 0, 0)
+
+    local leftPos  = torso.CFrame * CFrame.new(baseOffset - spread)
+    local rightPos = torso.CFrame * CFrame.new(baseOffset + spread)
+
+    local lPart, lWeld = createSphere(leftPos, Vector3.new(s, s, s), skinCol, function(part, weld)
+        local mesh = Instance.new("SpecialMesh")
+        mesh.MeshType = Enum.MeshType.Sphere
+        mesh.Scale = Vector3.new(1, 0.85, 1)
+        mesh.Parent = part
+        LeftMeshWeld = weld
+    end)
+
+    local rPart, rWeld = createSphere(rightPos, Vector3.new(s, s, s), skinCol, function(part, weld)
+        local mesh = Instance.new("SpecialMesh")
+        mesh.MeshType = Enum.MeshType.Sphere
+        mesh.Scale = Vector3.new(1, 0.85, 1)
+        mesh.Parent = part
+        RightMeshWeld = weld
+    end)
+
+    -- Nipple caps
+    local function makeNipple(parentPart, offsetCF)
+        local n = Instance.new("Part")
+        n.Shape = Enum.PartType.Ball
+        n.Size = Vector3.new(s * 0.32, s * 0.32, s * 0.32)
+        n.Color = pink1
+        n.Material = Enum.Material.SmoothPlastic
+        n.CanCollide = false
+        n.Massless = true
+        n.Parent = char
+
+        local nw = Instance.new("Weld")
+        nw.Part0 = parentPart
+        nw.Part1 = n
+        nw.C0 = offsetCF
+        nw.Parent = n
+
+        table.insert(CreatedBoobParts, n)
+        return n
+    end
+
+    makeNipple(lPart, CFrame.new(0, -s * 0.38, -s * 0.42) * CFrame.Angles(math.rad(-90), 0, 0))
+    makeNipple(rPart, CFrame.new(0, -s * 0.38, -s * 0.42) * CFrame.Angles(math.rad(-90), 0, 0))
+
+    -- Jiggle: bind to HumanoidRootPart velocity
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hrp and hum then
+        local running = false
+        local conn
+        conn = RunService.Heartbeat:Connect(function(dt)
+            if not (lWeld and lWeld.Parent and rWeld and rWeld.Parent) then
+                conn:Disconnect()
+                return
+            end
+            local vel = hrp.AssemblyLinearVelocity
+            local speed = vel.Magnitude
+            local bounce = math.clamp(speed / 60, 0, 1) * BoobSettings.Jiggle
+            local t = tick() * 12
+
+            local lOffset = CFrame.new(0, math.sin(t) * bounce * 0.04, -bounce * 0.05)
+            local rOffset = CFrame.new(0, math.sin(t + math.pi) * bounce * 0.04, -bounce * 0.05)
+
+            lWeld.C0 = CFrame.new(baseOffset - spread) * lOffset
+            rWeld.C0 = CFrame.new(baseOffset + spread) * rOffset
+
+            if BoobSettings.PhysicsBounce and hum.MoveDirection.Magnitude > 0.1 then
+                local tilt = math.rad(math.sin(t * 0.5) * 4 * bounce)
+                lWeld.C0 = lWeld.C0 * CFrame.Angles(tilt, 0, 0)
+                rWeld.C0 = rWeld.C0 * CFrame.Angles(tilt, 0, 0)
             end
         end)
     end
 end
 
---// FEATURE: ESP
-local espFolder = Instance.new("Folder", ScreenGui)
-espFolder.Name = "ESP"
-local espConn
-local function esp(state)
-    if espConn then espConn:Disconnect() espConn = nil end
-    for _, v in ipairs(espFolder:GetChildren()) do v:Destroy() end
-    if state then
-        espConn = RunService.RenderStepped:Connect(function()
-            for _, plr in ipairs(Players:GetPlayers()) do
-                if plr ~= LocalPlayer and plr.Character then
-                    local head = plr.Character:FindFirstChild("Head")
-                    if head then
-                        local existing = espFolder:FindFirstChild(plr.Name)
-                        if not existing then
-                            local billboard = Instance.new("BillboardGui")
-                            billboard.Name = plr.Name
-                            billboard.Size = UDim2.new(0, 100, 0, 30)
-                            billboard.AlwaysOnTop = true
-                            billboard.Parent = espFolder
+-- ==================================================
+-- CHARACTER EVENTS
+-- ==================================================
 
-                            local label = Instance.new("TextLabel")
-                            label.Size = UDim2.new(1, 0, 1, 0)
-                            label.BackgroundTransparency = 1
-                            label.Text = plr.Name
-                            label.TextColor3 = Color3.fromRGB(255, 60, 60)
-                            label.TextStrokeTransparency = 0
-                            label.Font = Enum.Font.GothamBold
-                            label.TextSize = 12
-                            label.Parent = billboard
-
-                            billboard.Adornee = head
-                        end
-                    end
-                end
-            end
-            for _, v in ipairs(espFolder:GetChildren()) do
-                local plr = Players:FindFirstChild(v.Name)
-                if not plr or not plr.Character or not plr.Character:FindFirstChild("Head") then
-                    v:Destroy()
-                end
-            end
-        end)
+local function OnCharacterAdded(char)
+    task.wait(0.5)
+    if not char or not char.Parent then return end
+    if BoobSettings.Enabled then
+        BuildSoftBoob(char)
     end
 end
---[[
-    PvP Script v.3 — PART 4/4
-    UI Build, Sliders, Reset, Respawn Handler
---]]
 
---// BUILD TOGGLES
-makeToggle("Invisible", "Invisible", setInvisible)
-makeToggle("Head In Ground", "HeadInGround", headInGround)
-makeToggle("Rapid Fire", "RapidFire", rapidFire)
-makeToggle("Fast Reload", "FastReload", fastReload)
-makeToggle("Item Vacuum", "ItemVacuum", itemVacuum)
-makeToggle("Speed Hack", "SpeedHack", applySpeed)
-makeToggle("Jump Hack", "JumpHack", applyJump)
-makeToggle("No Clip", "NoClip", noclip)
-makeToggle("Aim Assist (hold RMB)", "AimAssist", aimAssist)
-makeToggle("ESP", "ESP", esp)
+local function OnCharacterRemoving()
+    DestroyBoobs()
+end
 
---// SPEED SLIDER
-local speedBox = Instance.new("TextBox")
-speedBox.Size = UDim2.new(1, -10, 0, 30)
-speedBox.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-speedBox.Text = "Speed: 50"
-speedBox.TextColor3 = Color3.fromRGB(220, 220, 220)
-speedBox.Font = Enum.Font.Gotham
-speedBox.TextSize = 12
-speedBox.Parent = Scroll
-speedBox.FocusLost:Connect(function()
-    local num = tonumber(speedBox.Text:match("%d+"))
-    if num then
-        Config.SpeedValue = num
-        if Config.SpeedHack then applySpeed(true) end
-    end
-    speedBox.Text = "Speed: " .. Config.SpeedValue
-end)
-
---// JUMP SLIDER
-local jumpBox = Instance.new("TextBox")
-jumpBox.Size = UDim2.new(1, -10, 0, 30)
-jumpBox.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
-jumpBox.Text = "Jump: 120"
-jumpBox.TextColor3 = Color3.fromRGB(220, 220, 220)
-jumpBox.Font = Enum.Font.Gotham
-jumpBox.TextSize = 12
-jumpBox.Parent = Scroll
-jumpBox.FocusLost:Connect(function()
-    local num = tonumber(jumpBox.Text:match("%d+"))
-    if num then
-        Config.JumpValue = num
-        if Config.JumpHack then applyJump(true) end
-    end
-    jumpBox.Text = "Jump: " .. Config.JumpValue
-end)
-
---// RESET BUTTON
-makeButton("RESET ALL", function()
-    for k, v in pairs(Config) do
-        if type(v) == "boolean" then Config[k] = false end
-    end
-    if rapidFireConn then rapidFireConn:Disconnect() end
-    if fastReloadConn then fastReloadConn:Disconnect() end
-    if vacuumConn then vacuumConn:Disconnect() end
-    if noclipConn then noclipConn:Disconnect() end
-    if aimConn then aimConn:Disconnect() end
-    if espConn then espConn:Disconnect() end
-    setInvisible(false)
-    applySpeed(false)
-    applyJump(false)
-    esp(false)
-    for _, v in ipairs(Scroll:GetChildren()) do
-        if v:IsA("TextButton") then
-            if v.Text:find(":") then
-                v.Text = v.Text:gsub(": ON", ": OFF")
-                v.BackgroundColor3 = Color3.fromRGB(45, 45, 55)
+local function HookCharacter(char)
+    if not char then return end
+    char.ChildAdded:Connect(function(c)
+        if c:IsA("Accessory") or c.Name == "Shirt" or c.Name == "Pants" then
+            task.wait(0.1)
+            if BoobSettings.Enabled then
+                DestroyBoobs()
+                BuildSoftBoob(char)
             end
+        end
+    end)
+end
+
+-- ==================================================
+-- MAIN LOOP
+-- ==================================================
+
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+
+if LocalPlayer.Character then
+    OnCharacterAdded(LocalPlayer.Character)
+    HookCharacter(LocalPlayer.Character)
+end
+
+LocalPlayer.CharacterAdded:Connect(function(char)
+    OnCharacterAdded(char)
+    HookCharacter(char)
+end)
+
+LocalPlayer.CharacterRemoving:Connect(OnCharacterRemoving)
+
+-- Settings watcher: rebuild on toggle
+BoobSettings.Changed:Connect(function(key)
+    if key == "Enabled" or key == "Size" or key == "Jiggle" or key == "PhysicsBounce" then
+        if BoobSettings.Enabled and LocalPlayer.Character then
+            DestroyBoobs()
+            BuildSoftBoob(LocalPlayer.Character)
+        elseif not BoobSettings.Enabled then
+            DestroyBoobs()
         end
     end
 end)
 
---// RESPAWN HANDLER
-LocalPlayer.CharacterAdded:Connect(function(char)
-    task.wait(1)
-    if Config.SpeedHack then applySpeed(true) end
-    if Config.JumpHack then applyJump(true) end
-    if Config.Invisible then setInvisible(true) end
+-- Optional: watch all players (if you want it on others too)
+for _, plr in ipairs(Players:GetPlayers()) do
+    if plr ~= LocalPlayer then
+        plr.CharacterAdded:Connect(function(char)
+            task.wait(1)
+            if BoobSettings.Enabled and char and char.Parent then
+                BuildSoftBoob(char)
+            end
+        end)
+    end
+end
+
+Players.PlayerAdded:Connect(function(plr)
+    plr.CharacterAdded:Connect(function(char)
+        task.wait(1)
+        if BoobSettings.Enabled and char and char.Parent then
+            BuildSoftBoob(char)
+        end
+    end)
 end)
 
-print("[PvP Script v.3] Loaded — Anti-Ban active")
+print("[L]nw boob system loaded — settings:", BoobSettings.Size, BoobSettings.Jiggle)
