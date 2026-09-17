@@ -1,7 +1,6 @@
 --[[ 
     ==================================================
-    [PART 1/2] CORE ENGINES & LOGIC SYSTEMS
-    WindUI | SILENT AIM + ESP + BOOB PHYSICS + HITBOX + UTILITY + GUN MODS
+    [PART 1.1/3] SERVICES, VARIABLES & CORE LOGIC
     ==================================================
 ]]
 
@@ -58,15 +57,17 @@ local NPC_CACHE = {}
 
 local HitboxEnabled = false
 local HitboxSize = 10
+local BigHeadEnabled = false
+local BigHeadSize = 5
 local OriginalSizes = {}
 
--- Combat & Gun Mods Variables
 local FireRateVal = 0.1
 local FastFireEnabled = false
 local AutoReturnFire = false
 local AutoShootEnabled = false
 local BurstTwoEnabled = false
 local GodModeEnabled = false
+local InfiniteAmmoEnabled = false
 
 local LastShootTime = 0
 local IsShootingBurst = false
@@ -88,7 +89,7 @@ local PhysVel = Vector3.new(0,0,0)
 local LastHRPPos = nil
 
 --------------------------------------------------
--- Utility & Core Logic Functions
+-- Core Helper Functions
 --------------------------------------------------
 local function isAlive(char)
     local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -128,37 +129,35 @@ local function fireGun()
     end
 end
 
--- Godmode Loop
-RunService.Stepped:Connect(function()
-    if GodModeEnabled and LocalPlayer.Character then
-        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum.Health = hum.MaxHealth
-        end
-        for _, part in ipairs(LocalPlayer.Character:GetChildren()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = true
-            end
-        end
-    end
-end)
-
--- Return Fire Logic
-if LocalPlayer.Character then
-    local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-    if hum then
-        hum.HealthChanged:Connect(function()
-            if AutoReturnFire and getEquippedTool() and CurrentTarget then
-                if (tick() - LastShootTime > 0.2) then
-                    LastShootTime = tick()
-                    fireGun()
+local function handleInfiniteAmmo()
+    if not InfiniteAmmoEnabled then return end
+    local tool = getEquippedTool()
+    if tool then
+        for _, v in ipairs(tool:GetDescendants()) do
+            if v:IsA("IntValue") or v:IsA("NumberValue") then
+                local name = v.Name:lower()
+                if name:find("ammo") or name:find("clip") or name:find("count") or name:find("bullet") then
+                    v.Value = 999
                 end
             end
-        end)
+        end
     end
 end
 
--- Boob Physics Engine
+RunService.Stepped:Connect(function()
+    if GodModeEnabled and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.Health = hum.MaxHealth end
+    end
+    handleInfiniteAmmo()
+end)
+--[[ 
+    ==================================================
+    [PART 1.2/3] VISUALS, HITBOX, NPCS & LOOP ENGINE
+    ==================================================
+]]
+
+-- Physics Soft-Body (Boob) System
 local function DestroyBoobs()
     for _, v in ipairs(CreatedBoobParts) do
         if v and v.Parent then pcall(function() v:Destroy() end) end
@@ -243,7 +242,7 @@ RunService.Heartbeat:Connect(function(dt)
     end
 end)
 
--- Aim & ESP Mechanics
+-- Target Detection & Raycasting
 local RayParams = RaycastParams.new()
 RayParams.FilterType = Enum.RaycastFilterType.Blacklist
 RayParams.IgnoreWater = true
@@ -387,7 +386,7 @@ local function cameraLookAt(part)
     Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
 end
 
--- Listeners
+-- Input & Character Event Connections
 UserInputService.JumpRequest:Connect(function()
     if InfiniteJumpEnabled and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -426,12 +425,15 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     end
 end)
 
+-- Hitbox Adjuster
 local function UpdateHitbox()
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer then
             local char = p.Character
             if char and isAlive(char) and not isTeammate(p) then
                 local hrp = char:FindFirstChild("HumanoidRootPart")
+                local head = char:FindFirstChild("Head")
+                
                 if hrp then
                     if not OriginalSizes[hrp] then
                         OriginalSizes[hrp] = {Size = hrp.Size, Transparency = hrp.Transparency, CanCollide = hrp.CanCollide}
@@ -450,22 +452,43 @@ local function UpdateHitbox()
                         end
                     end
                 end
+
+                if head then
+                    if not OriginalSizes[head] then
+                        OriginalSizes[head] = {Size = head.Size, Transparency = head.Transparency, CanCollide = head.CanCollide}
+                    end
+                    if BigHeadEnabled then
+                        head.Size = Vector3.new(BigHeadSize, BigHeadSize, BigHeadSize)
+                        head.Transparency = 0.5
+                        head.CanCollide = false
+                    else
+                        if OriginalSizes[head] then
+                            head.Size = OriginalSizes[head].Size
+                            head.Transparency = OriginalSizes[head].Transparency
+                            head.CanCollide = OriginalSizes[head].CanCollide
+                        end
+                    end
+                end
             end
         end
     end
 end
 
--- NPC ESP Background Task
+-- NPC Scan Task
 task.spawn(function()
-    while task.wait(0.5) do
+    while task.wait(0.1) do
         if not ESP_NPC_ENABLED then
             for model, textObj in pairs(NPC_CACHE) do pcall(function() textObj:Remove() end) end
             NPC_CACHE = {}
         else
+            local activeNPCs = {}
             for _, obj in ipairs(workspace:GetDescendants()) do
                 if obj:IsA("Model") and obj:FindFirstChildOfClass("Humanoid") and not Players:GetPlayerFromCharacter(obj) then
+                    local hum = obj:FindFirstChildOfClass("Humanoid")
                     local hrp = obj:FindFirstChild("HumanoidRootPart") or obj:FindFirstChild("Head")
-                    if hrp then
+                    
+                    if hum and hum.Health > 0 and hrp then
+                        activeNPCs[obj] = true
                         if not NPC_CACHE[obj] then
                             local t = Drawing.new("Text")
                             t.Center = true
@@ -487,6 +510,13 @@ task.spawn(function()
                     end
                 end
             end
+
+            for model, textObj in pairs(NPC_CACHE) do
+                if not activeNPCs[model] then
+                    pcall(function() textObj:Remove() end)
+                    NPC_CACHE[model] = nil
+                end
+            end
         end
     end
 end)
@@ -504,7 +534,7 @@ local function joinLowPlayerServer()
     end
 end
 
--- Render Loop
+-- Main Render Loop
 RunService.RenderStepped:Connect(function()
     local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
 
@@ -534,6 +564,7 @@ RunService.RenderStepped:Connect(function()
 
     ESP_SYSTEM()
     RAINBOW_ESP_SYSTEM()
+    if HitboxEnabled or BigHeadEnabled then UpdateHitbox() end
 
     for char,_ in pairs(ESP_CACHE) do if not isCharValid(char) then clearESP(char) end end
     for char,_ in pairs(HIGHLIGHT_CACHE) do if not isCharValid(char) then clearHighlight(char) end end
@@ -550,7 +581,7 @@ RunService.RenderStepped:Connect(function()
 end)
 --[[ 
     ==================================================
-    [PART 2/2] UI INTERFACE & WINDOW CONTROL
+    [PART 3/3] UI INTERFACE & WINDOW CONTROL
     ==================================================
 ]]
 
@@ -608,8 +639,13 @@ AimbotTab:Toggle({
 
 AimbotTab:Section({Title = "Gun Modifies"})
 
+AimbotTab:Toggle({
+    Title = "1. กระสุนไม่จำกัด (Infinite Ammo)", 
+    Callback = function(v) InfiniteAmmoEnabled = v end
+})
+
 AimbotTab:Slider({
-    Title = "1. ปรับอัตราการยิง", 
+    Title = "2. ปรับอัตราการยิง", 
     Value = {Min = 0.01, Max = 1, Default = FireRateVal}, 
     Step = 0.01,
     Callback = function(v) 
@@ -619,22 +655,22 @@ AimbotTab:Slider({
 })
 
 AimbotTab:Toggle({
-    Title = "2. ยิงโต้กลับเมื่อศัตรูยิงเรามา", 
+    Title = "3. ยิงโต้กลับเมื่อศัตรูยิงเรามา", 
     Callback = function(v) AutoReturnFire = v end
 })
 
 AimbotTab:Toggle({
-    Title = "3. ยิงอัตโนมัติ", 
+    Title = "4. ยิงอัตโนมัติ", 
     Callback = function(v) AutoShootEnabled = v end
 })
 
 AimbotTab:Toggle({
-    Title = "4. ยิงทีละ 2 นัด", 
+    Title = "5. ยิงทีละ 2 นัด", 
     Callback = function(v) BurstTwoEnabled = v end
 })
 
 AimbotTab:Toggle({
-    Title = "5. โหมดอมตะ", 
+    Title = "6. โหมดอมตะ", 
     Callback = function(v) GodModeEnabled = v end
 })
 
@@ -646,7 +682,7 @@ local MiscTab = Window:Tab({Title = "Miscellaneous", Icon = "more-horizontal"})
 MiscTab:Section({Title = "ESP Options"})
 MiscTab:Toggle({Title = "ESP(ชื่อ)", Callback = function(v) ESP_ENABLED = v end})
 MiscTab:Toggle({Title = "ESP(กรอบสีรุ้ง)", Callback = function(v) RAINBOW_ESP = v end})
-MiscTab:Toggle({Title = "ESP มองเห็น NPC", Callback = function(v) ESP_NPC_ENABLED = v end})
+MiscTab:Toggle({Title = "ESP มองเห็น NPC (ปรับปรุงใหม่)", Callback = function(v) ESP_NPC_ENABLED = v end})
 
 MiscTab:Section({Title = "Player Options"})
 MiscTab:Toggle({Title = "เปิดใช้งานการวิ่งเร็ว", Callback = function(v) 
@@ -659,13 +695,23 @@ end})
 MiscTab:Slider({Title = "ปรับความเร็วการวิ่ง", Value = {Min = 16, Max = 250, Default = WalkSpeedVal}, Callback = function(v) WalkSpeedVal = v end})
 MiscTab:Toggle({Title = "กระโดดไม่จำกัด (Infinite Jump)", Callback = function(v) InfiniteJumpEnabled = v end})
 
+MiscTab:Section({Title = "Hitbox & Big Head"})
 MiscTab:Toggle({Title = "เปิดใช้งาน Hitbox (ขยายตัวศัตรู)", Callback = function(v) 
     HitboxEnabled = v 
     UpdateHitbox()
 end})
-MiscTab:Slider({Title = "ปรับขนาด Hitbox", Value = {Min = 2, Max = 50, Default = HitboxSize}, Callback = function(v) 
+MiscTab:Slider({Title = "ปรับขนาด Hitbox ตัว", Value = {Min = 2, Max = 50, Default = HitboxSize}, Callback = function(v) 
     HitboxSize = v 
     if HitboxEnabled then UpdateHitbox() end
+end})
+
+MiscTab:Toggle({Title = "เปิดใช้งานขยายหัวศัตรู (Big Head)", Callback = function(v) 
+    BigHeadEnabled = v 
+    UpdateHitbox()
+end})
+MiscTab:Slider({Title = "ปรับขนาดหัวศัตรู", Value = {Min = 2, Max = 20, Default = BigHeadSize}, Callback = function(v) 
+    BigHeadSize = v 
+    if BigHeadEnabled then UpdateHitbox() end
 end})
 
 MiscTab:Section({Title = "Visual & World"})
