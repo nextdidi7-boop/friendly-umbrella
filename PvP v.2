@@ -1,6 +1,6 @@
 --[[ 
     ==================================================
-    [PART 1.1/3] SERVICES, VARIABLES & CORE LOGIC
+    [PART 1.1/3] SERVICES, VARIABLES & GUN MOD LOGIC
     ==================================================
 ]]
 
@@ -61,32 +61,20 @@ local BigHeadEnabled = false
 local BigHeadSize = 5
 local OriginalSizes = {}
 
+-- Combat & Gun Mods Variables (Updated)
 local FireRateVal = 0.1
 local FastFireEnabled = false
 local AutoReturnFire = false
 local AutoShootEnabled = false
 local BurstTwoEnabled = false
 local GodModeEnabled = false
-local InfiniteAmmoEnabled = false
+
+local AutoReloadEnabled = false
+local ReloadSpeedVal = 0.1
+local IsReloading = false
 
 local LastShootTime = 0
 local IsShootingBurst = false
-
-local BoobSettings = {
-    Enabled = false,
-    Stiffness = 12,
-    Damping = 0.15,
-    Size = 1.0
-}
-
-local CreatedBoobParts = {}
-local LeftMeshWeld, RightMeshWeld = nil, nil
-local BaseLeftC0 = CFrame.new(-0.42, 0.1, -0.52)
-local BaseRightC0 = CFrame.new(0.42, 0.1, -0.52)
-
-local PhysPos = Vector3.new(0,0,0)
-local PhysVel = Vector3.new(0,0,0)
-local LastHRPPos = nil
 
 --------------------------------------------------
 -- Core Helper Functions
@@ -119,6 +107,7 @@ local function getEquippedTool()
 end
 
 local function fireGun()
+    if IsReloading then return end
     local tool = getEquippedTool()
     if tool then
         tool:Activate()
@@ -129,27 +118,41 @@ local function fireGun()
     end
 end
 
-local function handleInfiniteAmmo()
-    if not InfiniteAmmoEnabled then return end
+-- Auto Reload Logic
+local function handleAutoReload()
+    if not AutoReloadEnabled or IsReloading then return end
     local tool = getEquippedTool()
     if tool then
         for _, v in ipairs(tool:GetDescendants()) do
             if v:IsA("IntValue") or v:IsA("NumberValue") then
                 local name = v.Name:lower()
-                if name:find("ammo") or name:find("clip") or name:find("count") or name:find("bullet") then
-                    v.Value = 999
+                if (name:find("ammo") or name:find("clip") or name:find("bullet")) and v.Value <= 0 then
+                    IsReloading = true
+                    task.wait(ReloadSpeedVal)
+                    local maxAmmo = tool:FindFirstChild("MaxAmmo") or tool:FindFirstChild("ClipSize")
+                    v.Value = maxAmmo and maxAmmo.Value or 30
+                    IsReloading = false
+                    break
                 end
             end
         end
     end
 end
 
+-- Godmode & Stepped Loop
 RunService.Stepped:Connect(function()
     if GodModeEnabled and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if hum then hum.Health = hum.MaxHealth end
+        if hum then 
+            hum.Health = hum.MaxHealth 
+        end
+        for _, part in ipairs(LocalPlayer.Character:GetChildren()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = true
+            end
+        end
     end
-    handleInfiniteAmmo()
+    handleAutoReload()
 end)
 --[[ 
     ==================================================
@@ -158,6 +161,22 @@ end)
 ]]
 
 -- Physics Soft-Body (Boob) System
+local BoobSettings = {
+    Enabled = false,
+    Stiffness = 12,
+    Damping = 0.15,
+    Size = 1.0
+}
+
+local CreatedBoobParts = {}
+local LeftMeshWeld, RightMeshWeld = nil, nil
+local BaseLeftC0 = CFrame.new(-0.42, 0.1, -0.52)
+local BaseRightC0 = CFrame.new(0.42, 0.1, -0.52)
+
+local PhysPos = Vector3.new(0,0,0)
+local PhysVel = Vector3.new(0,0,0)
+local LastHRPPos = nil
+
 local function DestroyBoobs()
     for _, v in ipairs(CreatedBoobParts) do
         if v and v.Parent then pcall(function() v:Destroy() end) end
@@ -394,22 +413,25 @@ UserInputService.JumpRequest:Connect(function()
     end
 end)
 
-LocalPlayer.CharacterAdded:Connect(function(char)
-    task.wait(1)
+local function setupCharacterEvents(char)
+    if not char then return end
     if BoobSettings.Enabled then BuildSoftBoob(char) end
     
-    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hum = char:WaitForChild("Humanoid", 3)
     if hum then
         hum.HealthChanged:Connect(function()
             if AutoReturnFire and getEquippedTool() and CurrentTarget then
-                if (tick() - LastShootTime > 0.2) then
+                if (tick() - LastShootTime > FireRateVal) then
                     LastShootTime = tick()
                     fireGun()
                 end
             end
         end)
     end
-end)
+end
+
+if LocalPlayer.Character then setupCharacterEvents(LocalPlayer.Character) end
+LocalPlayer.CharacterAdded:Connect(setupCharacterEvents)
 
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
@@ -637,15 +659,22 @@ AimbotTab:Toggle({
     Callback = function(v) TeamCheck = v end
 })
 
-AimbotTab:Section({Title = "Gun Modifies"})
+AimbotTab:Section({Title = "Gun Modifies (Updated)"})
 
 AimbotTab:Toggle({
-    Title = "1. กระสุนไม่จำกัด (Infinite Ammo)", 
-    Callback = function(v) InfiniteAmmoEnabled = v end
+    Title = "1. รีโหลดกระสุนอัตโนมัติ (Auto Reload)", 
+    Callback = function(v) AutoReloadEnabled = v end
 })
 
 AimbotTab:Slider({
-    Title = "2. ปรับอัตราการยิง", 
+    Title = "2. ความเร็วในการรีโหลด (Reload Speed)", 
+    Value = {Min = 0.01, Max = 2, Default = ReloadSpeedVal}, 
+    Step = 0.01,
+    Callback = function(v) ReloadSpeedVal = v end
+})
+
+AimbotTab:Slider({
+    Title = "3. ปรับอัตราการยิง (Fire Rate)", 
     Value = {Min = 0.01, Max = 1, Default = FireRateVal}, 
     Step = 0.01,
     Callback = function(v) 
@@ -655,22 +684,22 @@ AimbotTab:Slider({
 })
 
 AimbotTab:Toggle({
-    Title = "3. ยิงโต้กลับเมื่อศัตรูยิงเรามา", 
+    Title = "4. ยิงโต้กลับเมื่อถูกยิง (Auto Return Fire)", 
     Callback = function(v) AutoReturnFire = v end
 })
 
 AimbotTab:Toggle({
-    Title = "4. ยิงอัตโนมัติ", 
+    Title = "5. ยิงอัตโนมัติ (Auto Shoot)", 
     Callback = function(v) AutoShootEnabled = v end
 })
 
 AimbotTab:Toggle({
-    Title = "5. ยิงทีละ 2 นัด", 
+    Title = "6. ยิงทีละ 2 นัด (Burst Shot)", 
     Callback = function(v) BurstTwoEnabled = v end
 })
 
 AimbotTab:Toggle({
-    Title = "6. โหมดอมตะ", 
+    Title = "7. โหมดอมตะ (God Mode)", 
     Callback = function(v) GodModeEnabled = v end
 })
 
