@@ -1,6 +1,8 @@
 --[[ 
+    ==================================================
     [PART 1/2] CORE ENGINES & LOGIC SYSTEMS
-    WindUI | SILENT AIM + ESP + BOOB PHYSICS + HITBOX + UTILITY + COMBAT EXTRAS
+    WindUI | SILENT AIM + ESP + BOOB PHYSICS + HITBOX + UTILITY + GUN MODS
+    ==================================================
 ]]
 
 --------------------------------------------------
@@ -22,7 +24,6 @@ local UserInputService = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
-local VirtualUser = game:GetService("VirtualUser")
 
 local Camera = workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
@@ -59,15 +60,16 @@ local HitboxEnabled = false
 local HitboxSize = 10
 local OriginalSizes = {}
 
--- COMBAT STATES
-local FireRate = 0.1
-local AutoRetaliate = false
-local AutoFire = false
-local BurstFire = false
-local GodMode = false
+-- Combat & Gun Mods Variables
+local FireRateVal = 0.1
+local FastFireEnabled = false
+local AutoReturnFire = false
+local AutoShootEnabled = false
+local BurstTwoEnabled = false
+local GodModeEnabled = false
 
-local LastHealth = 100
-local IsFiring = false
+local LastShootTime = 0
+local IsShootingBurst = false
 
 local BoobSettings = {
     Enabled = false,
@@ -108,94 +110,53 @@ local function isCharValid(char)
     return char and char.Parent and char:IsDescendantOf(workspace)
 end
 
-local function cameraLookAt(part)
-    if not part then return end
-    Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
-end
-
-local function getTarget()
-    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-    local closest, target = math.huge, nil
-
-    for _,p in ipairs(Players:GetPlayers()) do
-        local char = p.Character
-        if p ~= LocalPlayer and char and isAlive(char) and not isTeammate(p) then
-            local head = char:FindFirstChild("Head")
-            local hrp  = char:FindFirstChild("HumanoidRootPart")
-            if head and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= MaxDistance then
-                local s,on = Camera:WorldToViewportPoint(head.Position)
-                if on then
-                    local d = (Vector2.new(s.X,s.Y) - center).Magnitude
-                    if d < FOV and d < closest then
-                        closest, target = d, head
-                    end
-                end
-            end
-        end
+local function getEquippedTool()
+    if LocalPlayer.Character then
+        return LocalPlayer.Character:FindFirstChildOfClass("Tool")
     end
-    return target
+    return nil
 end
 
--- Weapon Execution Helper
-local function triggerShooter(shots)
-    shots = shots or 1
-    local char = LocalPlayer.Character
-    if not char then return end
-    local tool = char:FindFirstChildOfClass("Tool")
-    if not tool or IsFiring then return end
-
-    IsFiring = true
-    for i = 1, shots do
-        if not isAlive(char) then break end
+local function fireGun()
+    local tool = getEquippedTool()
+    if tool then
         tool:Activate()
-        pcall(function()
-            VirtualUser:Button1Down(Vector2.new(0, 0), Camera.CFrame)
-            task.wait(0.01)
-            VirtualUser:Button1Up(Vector2.new(0, 0), Camera.CFrame)
-        end)
-        if i < shots then
-            task.wait(FireRate)
+        if FastFireEnabled then
+            task.wait(FireRateVal)
+            tool:Deactivate()
         end
     end
-    IsFiring = false
 end
 
--- Auto Retaliation Listener
-local function setupRetaliation(char)
-    local hum = char:WaitForChild("Humanoid", 5)
-    if not hum then return end
-    
-    LastHealth = hum.Health
-    hum.HealthChanged:Connect(function(newHealth)
-        if AutoRetaliate and newHealth < LastHealth then
-            local tool = char:FindFirstChildOfClass("Tool")
-            if tool then
-                local target = CurrentTarget or getTarget()
-                if target then
-                    cameraLookAt(target)
-                    triggerShooter(BurstFire and 2 or 1)
-                end
-            end
+-- Godmode Loop
+RunService.Stepped:Connect(function()
+    if GodModeEnabled and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.Health = hum.MaxHealth
         end
-        LastHealth = newHealth
-    end)
-end
-
-if LocalPlayer.Character then setupRetaliation(LocalPlayer.Character) end
-LocalPlayer.CharacterAdded:Connect(setupRetaliation)
-
--- Auto Fire Background Thread
-task.spawn(function()
-    while task.wait(0.05) do
-        if AutoFire and CurrentTarget and LocalPlayer.Character then
-            local tool = LocalPlayer.Character:FindFirstChildOfClass("Tool")
-            if tool and not IsFiring then
-                triggerShooter(BurstFire and 2 or 1)
-                task.wait(FireRate)
+        for _, part in ipairs(LocalPlayer.Character:GetChildren()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = true
             end
         end
     end
 end)
+
+-- Return Fire Logic
+if LocalPlayer.Character then
+    local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.HealthChanged:Connect(function()
+            if AutoReturnFire and getEquippedTool() and CurrentTarget then
+                if (tick() - LastShootTime > 0.2) then
+                    LastShootTime = tick()
+                    fireGun()
+                end
+            end
+        end)
+    end
+end
 
 -- Boob Physics Engine
 local function DestroyBoobs()
@@ -281,11 +242,19 @@ RunService.Heartbeat:Connect(function(dt)
         LastHRPPos = nil
     end
 end)
---[[ 
-    [PART 2/2] UI INTERFACE & RENDER LOOPS
-]]
 
--- Draw Tools
+-- Aim & ESP Mechanics
+local RayParams = RaycastParams.new()
+RayParams.FilterType = Enum.RaycastFilterType.Blacklist
+RayParams.IgnoreWater = true
+
+local function isVisible(part, char)
+    RayParams.FilterDescendantsInstances = {LocalPlayer.Character, char}
+    local origin = Camera.CFrame.Position
+    local dir = part.Position - origin
+    return not workspace:Raycast(origin, dir, RayParams)
+end
+
 local FOVCircle = Drawing.new("Circle")
 FOVCircle.Thickness = 2
 FOVCircle.Filled = false
@@ -390,6 +359,35 @@ local function RAINBOW_ESP_SYSTEM()
     end
 end
 
+local function getTarget()
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    local closest, target = math.huge, nil
+
+    for _,p in ipairs(Players:GetPlayers()) do
+        local char = p.Character
+        if p ~= LocalPlayer and char and isAlive(char) and not isTeammate(p) then
+            local head = char:FindFirstChild("Head")
+            local hrp  = char:FindFirstChild("HumanoidRootPart")
+            if head and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= MaxDistance and isVisible(head, char) then
+                local s,on = Camera:WorldToViewportPoint(head.Position)
+                if on then
+                    local d = (Vector2.new(s.X,s.Y) - center).Magnitude
+                    if d < FOV and d < closest then
+                        closest, target = d, head
+                    end
+                end
+            end
+        end
+    end
+    return target
+end
+
+local function cameraLookAt(part)
+    if not part then return end
+    Camera.CFrame = CFrame.new(Camera.CFrame.Position, part.Position)
+end
+
+-- Listeners
 UserInputService.JumpRequest:Connect(function()
     if InfiniteJumpEnabled and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -400,6 +398,32 @@ end)
 LocalPlayer.CharacterAdded:Connect(function(char)
     task.wait(1)
     if BoobSettings.Enabled then BuildSoftBoob(char) end
+    
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if hum then
+        hum.HealthChanged:Connect(function()
+            if AutoReturnFire and getEquippedTool() and CurrentTarget then
+                if (tick() - LastShootTime > 0.2) then
+                    LastShootTime = tick()
+                    fireGun()
+                end
+            end
+        end)
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 and BurstTwoEnabled and not IsShootingBurst then
+        local tool = getEquippedTool()
+        if tool then
+            IsShootingBurst = true
+            fireGun()
+            task.wait(0.08)
+            fireGun()
+            IsShootingBurst = false
+        end
+    end
 end)
 
 local function UpdateHitbox()
@@ -431,7 +455,7 @@ local function UpdateHitbox()
     end
 end
 
--- NPC ESP Loop
+-- NPC ESP Background Task
 task.spawn(function()
     while task.wait(0.5) do
         if not ESP_NPC_ENABLED then
@@ -480,7 +504,7 @@ local function joinLowPlayerServer()
     end
 end
 
--- Main Render Loop
+-- Render Loop
 RunService.RenderStepped:Connect(function()
     local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
 
@@ -501,11 +525,10 @@ RunService.RenderStepped:Connect(function()
         AimLine.Visible = true
     end
 
-    if GodMode and LocalPlayer.Character then
-        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
-        if hum then
-            hum.Health = hum.MaxHealth
-            hum:SetStateEnabled(Enum.HumanoidStateType.Dead, false)
+    if AutoShootEnabled and CurrentTarget and getEquippedTool() then
+        if tick() - LastShootTime >= FireRateVal then
+            LastShootTime = tick()
+            fireGun()
         end
     end
 
@@ -525,66 +548,137 @@ RunService.RenderStepped:Connect(function()
         Lighting.ClockTime = 12
     end
 end)
+--[[ 
+    ==================================================
+    [PART 2/2] UI INTERFACE & WINDOW CONTROL
+    ==================================================
+]]
 
 --------------------------------------------------
--- UI Window Initialization
+-- UI Window Initialization (Dolly Hub Style)
 --------------------------------------------------
 local Window = WindUI:CreateWindow({
-    Title="Thug Hunters💢👿",
-    Folder="WindHub",
-    OpenButton={Title="Thug Hunters💢👿",Enabled=true}
+    Title = "Dolly Hub",
+    Subtitle = "ปลาตากแห้งสคริปต์ที่ดีที่สุด",
+    Folder = "DollyHubConfig",
+    OpenButton = {Title = "Dolly Hub", Enabled = true}
 })
 
--- TAB 1: MAIN MENU
-local Main = Window:Tab({Title="เมนู(กด)"})
+--------------------------------------------------
+-- TAB 1: AIMBOT & GUN MODIFIES
+--------------------------------------------------
+local AimbotTab = Window:Tab({Title = "Aimbot", Icon = "target"})
 
-Main:Toggle({Title="🔫 ล็อค(บังคับกระสุน)", Callback=function(v) SilentAim=v end})
-Main:Toggle({Title="🔫 ล็อค(หันจอไปหัว)", Callback=function(v) CAMERA_LOCK=v end})
-Main:Toggle({Title="⚡ ยิงอัตโนมัติ (Auto Fire)", Callback=function(v) AutoFire=v end})
-Main:Toggle({Title="⚔️ ยิงโต้กลับเมื่อถูกยิง (Auto Retaliate)", Callback=function(v) AutoRetaliate=v end})
-Main:Toggle({Title="💥 โหมดยิงทีละ 2 นัด (Burst Mode)", Callback=function(v) BurstFire=v end})
-Main:Slider({Title="⏱️ อัตราการยิง (Fire Rate Delay)", Value={Min=0.01, Max=0.5, Default=FireRate}, Step=0.01, Callback=function(v) FireRate=v end})
-Main:Toggle({Title="🛡️ โหมดอมตะ (God Mode)", Callback=function(v) GodMode=v end})
-Main:Toggle({Title="👑 ESP(ชื่อ)", Callback=function(v) ESP_ENABLED=v end})
-Main:Toggle({Title="👹 ESP(กรอบสีรุ้ง)", Callback=function(v) RAINBOW_ESP=v end})
-Main:Toggle({Title="Team Check", Default=true, Callback=function(v) TeamCheck=v end})
-Main:Slider({Title="👹 FOV", Value={Min=40,Max=4000,Default=FOV}, Callback=function(v) FOV=v end})
-Main:Slider({Title="👹 ระยะ", Value={Min=100,Max=12000,Default=MaxDistance}, Callback=function(v) MaxDistance=v end})
+AimbotTab:Section({Title = "Aimbot"})
 
--- TAB 2: PLAYER OPTIONS
-local PlayerTab = Window:Tab({Title="Player Options"})
+AimbotTab:Toggle({
+    Title = "ล็อคหัว", 
+    Callback = function(v) CAMERA_LOCK = v end
+})
 
-PlayerTab:Toggle({Title="เปิดใช้งานการวิ่งเร็ว", Callback=function(v) 
+AimbotTab:Toggle({
+    Title = "ล็อคกระสุน (Silent Aim)", 
+    Callback = function(v) SilentAim = v end
+})
+
+AimbotTab:Dropdown({
+    Title = "เลือกส่วนที่จะยิง", 
+    Values = {"ศีรษะ", "ลำตัว"}, 
+    Default = "ศีรษะ",
+    Callback = function(v) end
+})
+
+AimbotTab:Slider({
+    Title = "ขนาด POV", 
+    Value = {Min = 40, Max = 4000, Default = FOV}, 
+    Callback = function(v) FOV = v end
+})
+
+AimbotTab:Slider({
+    Title = "ระยะล็อค", 
+    Value = {Min = 100, Max = 12000, Default = MaxDistance}, 
+    Callback = function(v) MaxDistance = v end
+})
+
+AimbotTab:Toggle({
+    Title = "Team Check", 
+    Default = true, 
+    Callback = function(v) TeamCheck = v end
+})
+
+AimbotTab:Section({Title = "Gun Modifies"})
+
+AimbotTab:Slider({
+    Title = "1. ปรับอัตราการยิง", 
+    Value = {Min = 0.01, Max = 1, Default = FireRateVal}, 
+    Step = 0.01,
+    Callback = function(v) 
+        FireRateVal = v 
+        FastFireEnabled = true
+    end
+})
+
+AimbotTab:Toggle({
+    Title = "2. ยิงโต้กลับเมื่อศัตรูยิงเรามา", 
+    Callback = function(v) AutoReturnFire = v end
+})
+
+AimbotTab:Toggle({
+    Title = "3. ยิงอัตโนมัติ", 
+    Callback = function(v) AutoShootEnabled = v end
+})
+
+AimbotTab:Toggle({
+    Title = "4. ยิงทีละ 2 นัด", 
+    Callback = function(v) BurstTwoEnabled = v end
+})
+
+AimbotTab:Toggle({
+    Title = "5. โหมดอมตะ", 
+    Callback = function(v) GodModeEnabled = v end
+})
+
+--------------------------------------------------
+-- TAB 2: MISCELLANEOUS
+--------------------------------------------------
+local MiscTab = Window:Tab({Title = "Miscellaneous", Icon = "more-horizontal"})
+
+MiscTab:Section({Title = "ESP Options"})
+MiscTab:Toggle({Title = "ESP(ชื่อ)", Callback = function(v) ESP_ENABLED = v end})
+MiscTab:Toggle({Title = "ESP(กรอบสีรุ้ง)", Callback = function(v) RAINBOW_ESP = v end})
+MiscTab:Toggle({Title = "ESP มองเห็น NPC", Callback = function(v) ESP_NPC_ENABLED = v end})
+
+MiscTab:Section({Title = "Player Options"})
+MiscTab:Toggle({Title = "เปิดใช้งานการวิ่งเร็ว", Callback = function(v) 
     WalkSpeedEnabled = v 
     if not v and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
         if hum then hum.WalkSpeed = 16 end
     end
 end})
-PlayerTab:Slider({Title="ปรับความเร็วการวิ่ง", Value={Min=16, Max=250, Default=WalkSpeedVal}, Callback=function(v) WalkSpeedVal = v end})
-PlayerTab:Toggle({Title="กระโดดไม่จำกัด (Infinite Jump)", Callback=function(v) InfiniteJumpEnabled = v end})
-PlayerTab:Toggle({Title="เปิดใช้งาน Hitbox (ขยายตัวศัตรู)", Callback=function(v) 
+MiscTab:Slider({Title = "ปรับความเร็วการวิ่ง", Value = {Min = 16, Max = 250, Default = WalkSpeedVal}, Callback = function(v) WalkSpeedVal = v end})
+MiscTab:Toggle({Title = "กระโดดไม่จำกัด (Infinite Jump)", Callback = function(v) InfiniteJumpEnabled = v end})
+
+MiscTab:Toggle({Title = "เปิดใช้งาน Hitbox (ขยายตัวศัตรู)", Callback = function(v) 
     HitboxEnabled = v 
     UpdateHitbox()
 end})
-PlayerTab:Slider({Title="ปรับขนาด Hitbox", Value={Min=2, Max=50, Default=HitboxSize}, Callback=function(v) 
+MiscTab:Slider({Title = "ปรับขนาด Hitbox", Value = {Min = 2, Max = 50, Default = HitboxSize}, Callback = function(v) 
     HitboxSize = v 
     if HitboxEnabled then UpdateHitbox() end
 end})
 
--- TAB 3: VISUAL & WORLD
-local VisualTab = Window:Tab({Title="Visual & World"})
-
-VisualTab:Toggle({Title="เปิดความสว่างแมพ (Fullbright)", Callback=function(v) 
+MiscTab:Section({Title = "Visual & World"})
+MiscTab:Toggle({Title = "เปิดความสว่างแมพ (Fullbright)", Callback = function(v) 
     FullbrightEnabled = v 
     if not v then
         Lighting.Brightness = OriginalBrightness
         Lighting.ClockTime = OriginalClockTime
     end
 end})
-VisualTab:Slider({Title="ระดับความสว่าง", Value={Min=1, Max=10, Default=BrightnessVal}, Callback=function(v) BrightnessVal = v end})
-VisualTab:Toggle({Title="ESP มองเห็น NPC", Callback=function(v) ESP_NPC_ENABLED = v end})
-VisualTab:Button({Title="🚀 อัปเดต FPS (Optimize/Boost FPS)", Callback=function()
+MiscTab:Slider({Title = "ระดับความสว่าง", Value = {Min = 1, Max = 10, Default = BrightnessVal}, Callback = function(v) BrightnessVal = v end})
+
+MiscTab:Button({Title = "🚀 อัปเดต FPS (Optimize/Boost FPS)", Callback = function()
     for _, item in ipairs(workspace:GetDescendants()) do
         if item:IsA("BasePart") then
             item.Material = Enum.Material.SmoothPlastic
@@ -595,17 +689,12 @@ VisualTab:Button({Title="🚀 อัปเดต FPS (Optimize/Boost FPS)", Call
     Lighting.GlobalShadows = false
 end})
 
--- TAB 4: SERVER & MISC
-local ServerTab = Window:Tab({Title="Server & Misc"})
-
-ServerTab:Button({Title="🌐 เข้าร่วม Server คนน้อย (Rejoin Low Players)", Callback=function()
+MiscTab:Button({Title = "🌐 เข้าร่วม Server คนน้อย (Rejoin Low Players)", Callback = function()
     joinLowPlayerServer()
 end})
 
--- TAB 5: TROLL
-local TrollTab = Window:Tab({Title="เกรียน"})
-
-TrollTab:Toggle({
+MiscTab:Section({Title = "Fun Options"})
+MiscTab:Toggle({
     Title = "🍑 เปิดใช้งานโหมดนมเด้งละมุน",
     Default = BoobSettings.Enabled,
     Callback = function(v)
