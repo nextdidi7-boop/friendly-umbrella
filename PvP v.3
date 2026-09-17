@@ -1,4 +1,4 @@
---[[ 
+--[[
     ==================================================
     [Dolly Hub PvP v3] [PART 1/4]
     SERVICES · STATE · HELPERS · AIM ENGINE
@@ -44,24 +44,25 @@ local TargetPriority   = "Closest"
 local VisibleCheckOnly = true
 local WallbangEnabled  = false
 local StickyAim        = false
+local AimPart          = "Head" -- "Head" | "HumanoidRootPart"
 
 -- Gun extras
-local TriggerBot       = false
-local TriggerDelay     = 0.02
-local AutoScope        = false
-local NoRecoil         = false
-local NoSpread         = false
-local InstantHit       = false
-local RapidFire        = false
-local FireRateVal      = 0.1
-local AutoSwitchTarget = false
-local AutoReturnFire   = false
-local AutoShootEnabled = false
-local BurstTwoEnabled  = false
-local GodModeEnabled   = false
+local TriggerBot        = false
+local TriggerDelay      = 0.02
+local AutoScope         = false
+local NoRecoil          = false
+local NoSpread          = false
+local RapidFire         = false
+local FireRateVal       = 0.1
+local PreRapidFireRate  = 0.1
+local AutoSwitchTarget  = false
+local AutoReturnFire    = false
+local AutoShootEnabled  = false
+local BurstTwoEnabled   = false
+local GodModeEnabled    = false
 local AutoReloadEnabled = false
-local ReloadSpeedVal   = 0.2
-local IsReloading      = false
+local ReloadSpeedVal    = 0.2
+local IsReloading       = false
 
 -- Utility
 local AntiFlinch    = false
@@ -74,30 +75,40 @@ local KillNotifier  = false
 local AutoRespawn   = false
 
 -- Misc
-local WalkSpeedVal     = 16
-local WalkSpeedEnabled = false
+local WalkSpeedVal        = 16
+local WalkSpeedEnabled    = false
 local InfiniteJumpEnabled = false
-local BrightnessVal    = 1
-local FullbrightEnabled = false
-local OriginalBrightness = Lighting.Brightness
-local OriginalClockTime  = Lighting.ClockTime
-local ESP_NPC_ENABLED = false
-local HitboxEnabled   = false
-local HitboxSize      = 10
-local BigHeadEnabled  = false
-local BigHeadSize     = 5
+local BrightnessVal       = 1
+local FullbrightEnabled   = false
+local OriginalBrightness  = Lighting.Brightness
+local OriginalClockTime   = Lighting.ClockTime
+local ESP_NPC_ENABLED     = false
+local HitboxEnabled       = false
+local HitboxSize          = 10
+local BigHeadEnabled      = false
+local BigHeadSize         = 5
 
-local CurrentTarget   = nil
-local StickyTarget    = nil
-local ESP_CACHE       = {}
-local HIGHLIGHT_CACHE = {}
-local NPC_CACHE       = {}
-local OriginalSizes   = {}
-local HookedTools     = {}
-local LastShootTime   = 0
-local LastTriggerTime = 0
-local LastDodgeTime   = 0
-local IsShootingBurst = false
+-- Runtime
+local CurrentTarget       = nil
+local CurrentTargetData   = nil
+local StickyTarget        = nil
+local ESP_CACHE           = {}
+local HIGHLIGHT_CACHE     = {}
+local NPC_CACHE           = {}
+local OriginalSizes       = {}
+local HookedTools         = {}
+local LastShootTime       = 0
+local LastTriggerTime     = 0
+local LastDodgeTime       = 0
+local LastTargetScan      = 0
+local IsShootingBurst     = false
+
+-- Anti-stun baseline (แยกจาก WalkSpeedVal)
+local ANTI_STUN_SPEED = 16
+local ANTI_STUN_JUMP  = 50
+
+-- Drawings (สำหรับ unload)
+local DRAWINGS = {}
 
 -- ═══════════════════════════════════════════════════════
 -- HELPERS
@@ -137,6 +148,11 @@ local function notify(title, text, dur)
     end)
 end
 
+local function trackDrawing(d)
+    table.insert(DRAWINGS, d)
+    return d
+end
+
 -- ═══════════════════════════════════════════════════════
 -- AIM ENGINE
 -- ═══════════════════════════════════════════════════════
@@ -163,32 +179,39 @@ local function facingMe(char)
     if not hrp or not LocalPlayer.Character then return false end
     local myHrp = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not myHrp then return false end
-    local toMe   = (myHrp.Position - hrp.Position).Unit
+    local toMe = (myHrp.Position - hrp.Position).Unit
     return hrp.CFrame.LookVector:Dot(toMe) > 0.3
 end
 
 function getTarget()
+    -- throttle: scan ทุก ~3 frames พอ
+    local now = tick()
+    if now - LastTargetScan < 0.05 and CurrentTarget and CurrentTarget.Parent then
+        return CurrentTarget, CurrentTargetData
+    end
+    LastTargetScan = now
+
     local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
     local list = {}
 
     for _, p in ipairs(Players:GetPlayers()) do
         local char = p.Character
         if p ~= LocalPlayer and char and isAlive(char) and not isTeammate(p) then
-            local head = char:FindFirstChild("Head")
-            local hrp  = char:FindFirstChild("HumanoidRootPart")
-            if head and hrp then
+            local aimPart = char:FindFirstChild(AimPart)
+            local hrp     = char:FindFirstChild("HumanoidRootPart")
+            if aimPart and hrp then
                 local dist = (Camera.CFrame.Position - hrp.Position).Magnitude
                 if dist <= MaxDistance then
-                    local aimPos = predictPosition(hrp, head)
+                    local aimPos = predictPosition(hrp, aimPart)
                     local sp, on = Camera:WorldToViewportPoint(aimPos)
                     if on then
                         local sd = (Vector2.new(sp.X, sp.Y) - center).Magnitude
                         if sd < FOV then
                             local hum = char:FindFirstChildOfClass("Humanoid")
-                            local vis = isVisible(head, char)
+                            local vis = isVisible(aimPart, char)
                             if vis or WallbangEnabled then
                                 table.insert(list, {
-                                    head = head, hrp = hrp, player = p, char = char,
+                                    head = aimPart, hrp = hrp, player = p, char = char,
                                     dist = dist, screenDist = sd,
                                     hp = hum and hum.Health or math.huge,
                                     facing = facingMe(char),
@@ -254,7 +277,7 @@ local function clearESP(char)
     clearHighlight(char)
 end
 
---[[ 
+--[[
     ==================================================
     [Dolly Hub PvP v3] [PART 2/4]
     GUN · RELOAD · HOOKS · UTILITY · NOTIFIER
@@ -269,9 +292,9 @@ local function fireGun()
     if IsReloading then return end
     local tool = getEquippedTool()
     if tool then
-        tool:Activate()
+        pcall(function() tool:Activate() end)
         task.wait(math.clamp(FireRateVal, 0.03, 1))
-        tool:Deactivate()
+        pcall(function() tool:Deactivate() end)
     end
 end
 
@@ -280,14 +303,16 @@ local function fastReload()
     local char = LocalPlayer.Character
     local hum  = char and char:FindFirstChildOfClass("Humanoid")
     local tool = getEquippedTool()
-    if hum and tool then
-        IsReloading = true
+    if not (hum and tool) then return end
+
+    IsReloading = true
+    task.spawn(function()
         task.wait(ReloadSpeedVal)
-        hum:UnequipTools()
+        pcall(function() hum:UnequipTools() end)
         task.wait(0.05)
-        hum:EquipTool(tool)
+        pcall(function() hum:EquipTool(tool) end)
         IsReloading = false
-    end
+    end)
 end
 
 local function handleAutoReload()
@@ -373,23 +398,20 @@ end
 local function applyAntiFlinch(char)
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
-    if AntiFlinch then
-        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, false)
-        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, false)
-        hum:SetStateEnabled(Enum.HumanoidStateType.PlatformStanding, false)
-    else
-        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown, true)
-        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll, true)
-        hum:SetStateEnabled(Enum.HumanoidStateType.PlatformStanding, true)
-    end
+    local on = AntiFlinch
+    pcall(function()
+        hum:SetStateEnabled(Enum.HumanoidStateType.FallingDown,    not on)
+        hum:SetStateEnabled(Enum.HumanoidStateType.Ragdoll,        not on)
+        hum:SetStateEnabled(Enum.HumanoidStateType.PlatformStanding, not on)
+    end)
 end
 
 local function applyAntiStun(char)
     if not AntiStun then return end
     local hum = char and char:FindFirstChildOfClass("Humanoid")
     if not hum then return end
-    if hum.WalkSpeed < WalkSpeedVal then hum.WalkSpeed = WalkSpeedVal end
-    if (hum.JumpPower or 0) < 50 then hum.JumpPower = 50 end
+    if hum.WalkSpeed < ANTI_STUN_SPEED then hum.WalkSpeed = ANTI_STUN_SPEED end
+    if (hum.JumpPower or 0) < ANTI_STUN_JUMP then hum.JumpPower = ANTI_STUN_JUMP end
 end
 
 local function doDodge()
@@ -427,7 +449,7 @@ local function setupCharUtility(char)
         if AutoReturnFire and getEquippedTool() and CurrentTarget then
             if tick() - LastShootTime > FireRateVal then
                 LastShootTime = tick()
-                fireGun()
+                task.spawn(fireGun)
             end
         end
     end)
@@ -435,7 +457,7 @@ local function setupCharUtility(char)
     hum.Died:Connect(function()
         if AutoRespawn then
             task.wait(0.5)
-            LocalPlayer:LoadCharacter()
+            pcall(function() LocalPlayer:LoadCharacter() end)
         end
     end)
 end
@@ -466,6 +488,16 @@ Players.PlayerAdded:Connect(function(p)
 end)
 watchKills()
 
+-- Cleanup OriginalSizes on leave/respawn
+Players.PlayerRemoving:Connect(function(p)
+    local char = p.Character
+    if char then
+        for _, d in ipairs(char:GetDescendants()) do
+            OriginalSizes[d] = nil
+        end
+    end
+end)
+
 UserInputService.JumpRequest:Connect(function()
     if InfiniteJumpEnabled and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -480,8 +512,12 @@ UserInputService.InputBegan:Connect(function(input, gp)
         local tool = getEquippedTool()
         if tool then
             IsShootingBurst = true
-            fireGun(); task.wait(0.08); fireGun()
-            IsShootingBurst = false
+            task.spawn(function()
+                fireGun()
+                task.wait(0.08)
+                fireGun()
+                IsShootingBurst = false
+            end)
         end
     end
 end)
@@ -499,7 +535,7 @@ end
 if LocalPlayer.Character then scanTools(LocalPlayer.Character) end
 LocalPlayer.CharacterAdded:Connect(scanTools)
 
--- Heartbeat loop
+-- Stepped loop
 RunService.Stepped:Connect(function()
     if GodModeEnabled and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
@@ -510,19 +546,19 @@ RunService.Stepped:Connect(function()
     applyAntiStun(LocalPlayer.Character)
 end)
 
---[[ 
+--[[
     ==================================================
     [Dolly Hub PvP v3] [PART 3/4]
     ESP · NPC · HITBOX · RENDER · LOW-PLAYER JOIN
     ==================================================
 ]]
 
-local FOVCircle = Drawing.new("Circle")
+local FOVCircle = trackDrawing(Drawing.new("Circle"))
 FOVCircle.Thickness = 2
 FOVCircle.Filled    = false
 FOVCircle.Color     = Color3.fromRGB(255,255,0)
 
-local AimLine = Drawing.new("Line")
+local AimLine = trackDrawing(Drawing.new("Line"))
 AimLine.Thickness = 2
 AimLine.Color     = Color3.fromRGB(255,0,0)
 
@@ -649,10 +685,11 @@ RunService.RenderStepped:Connect(function()
     FOVCircle.Visible  = SilentAim or CAMERA_LOCK
 
     AimLine.Visible = false
-    CurrentTarget = nil
+    CurrentTarget     = nil
+    CurrentTargetData = nil
 
     if SilentAim or CAMERA_LOCK or TriggerBot then
-        CurrentTarget = select(1, getTarget())
+        CurrentTarget, CurrentTargetData = getTarget()
     end
 
     if CAMERA_LOCK and CurrentTarget then
@@ -670,7 +707,7 @@ RunService.RenderStepped:Connect(function()
     if TriggerBot and CurrentTarget and tick() - LastTriggerTime > TriggerDelay then
         if getEquippedTool() then
             LastTriggerTime = tick()
-            fireGun()
+            task.spawn(fireGun)
         end
     end
 
@@ -678,7 +715,7 @@ RunService.RenderStepped:Connect(function()
     if AutoShootEnabled and CurrentTarget and getEquippedTool() then
         if tick() - LastShootTime >= FireRateVal then
             LastShootTime = tick()
-            fireGun()
+            task.spawn(fireGun)
         end
     end
 
@@ -776,135 +813,7 @@ RunService.RenderStepped:Connect(function()
     end
 end)
 
---[[ 
-    ==================================================
-    [Dolly Hub PvP v3] [PART 4/4]
-    UI — AIM · GUN · PvP UTILITY · MISC
-    ==================================================
-]]
-
-local Window = WindUI:CreateWindow({
-    Title = "Dolly Hub",
-    Subtitle = "ปลาตากแห้งสคริปต์ที่ดีที่สุด",
-    Folder = "DollyHubConfig",
-    OpenButton = {Title = "Dolly Hub", Enabled = true}
-})
-
--- ═══════════════════════════════════════════════════════
--- TAB: AIM
--- ═══════════════════════════════════════════════════════
-
-local AimTab = Window:Tab({Title = "Aim", Icon = "target"})
-
-AimTab:Section({Title = "Aimbot"})
-AimTab:Toggle({Title = "ล็อคหัว", Callback = function(v) CAMERA_LOCK = v end})
-AimTab:Toggle({Title = "ล็อคกระสุน (Silent Aim)", Callback = function(v) SilentAim = v end})
-AimTab:Dropdown({
-    Title = "เลือกส่วนที่จะยิง",
-    Values = {"ศีรษะ", "ลำตัว"},
-    Default = "ศีรษะ",
-    Callback = function(v) end
-})
-AimTab:Slider({
-    Title = "ขนาด POV",
-    Value = {Min = 40, Max = 4000, Default = FOV},
-    Callback = function(v) FOV = v end
-})
-AimTab:Slider({
-    Title = "ระยะล็อค",
-    Value = {Min = 100, Max = 12000, Default = MaxDistance},
-    Callback = function(v) MaxDistance = v end
-})
-
-AimTab:Section({Title = "Aim Behavior"})
-AimTab:Slider({
-    Title = "Aim Smoothness (นุ่ม = ค่าสูง)",
-    Value = {Min = 0.05, Max = 1, Default = AimSmoothness},
-    Step = 0.05,
-    Callback = function(v) AimSmoothness = v end
-})
-AimTab:Toggle({
-    Title = "Aim Prediction (ยิงล่วงหน้า)",
-    Callback = function(v) AimPrediction = v end
-})
-AimTab:Slider({
-    Title = "Prediction Amount",
-    Value = {Min = 0.05, Max = 0.5, Default = PredictionAmount},
-    Step = 0.01,
-    Callback = function(v) PredictionAmount = v end
-})
-AimTab:Dropdown({
-    Title = "Target Priority",
-    Values = {"Closest", "LowestHP", "FacingMe"},
-    Default = "Closest",
-    Callback = function(v) TargetPriority = v end
-})
-AimTab:Toggle({
-    Title = "Visible Check (ยิงเฉพาะที่มองเห็น)",
-    Default = true,
-    Callback = function(v) VisibleCheckOnly = v end
-})
-AimTab:Toggle({
-    Title = "Wallbang (ยิงทะลุกำแพง)",
-    Callback = function(v) WallbangEnabled = v end
-})
-AimTab:Toggle({
-    Title = "Sticky Aim (ล็อคเป้าเดิมจนตาย)",
-    Callback = function(v) StickyAim = v end
-})
-AimTab:Toggle({
-    Title = "Team Check",
-    Default = true,
-    Callback = function(v) TeamCheck = v end
-})
-
--- ═══════════════════════════════════════════════════════
--- TAB: GUN
--- ═══════════════════════════════════════════════════════
-
-local GunTab = Window:Tab({Title = "Gun", Icon = "crosshair"})
-
-GunTab:Section({Title = "Firing"})
-GunTab:Toggle({
-    Title = "Trigger Bot (ยิงเมื่อเล็งโดน)",
-    Callback = function(v) TriggerBot = v end
-})
-GunTab:Slider({
-    Title = "Trigger Delay",
-    Value = {Min = 0.01, Max = 0.5, Default = TriggerDelay},
-    Step = 0.01,
-    Callback = function(v) TriggerDelay = v end
-})
-GunTab:Toggle({Title = "Auto Shoot", Callback = function(v) AutoShootEnabled = v end})
-GunTab:Toggle({Title = "Burst Shot (ยิงทีละ 2 นัด)", Callback = function(v) BurstTwoEnabled = v end})
-GunTab:Toggle({Title = "Auto Return Fire (ยิงโต้กลับ)", Callback = function(v) AutoReturnFire = v end})
-GunTab:Slider({
-    Title = "Fire Rate Delay",
-    Value = {Min = 0.03, Max = 1, Default = FireRateVal},
-    Step = 0.01,
-    Callback = function(v) FireRateVal = v end
-})
-GunTab:Toggle({
-    Title = "Rapid Fire (ยิงรัวสุด)",
-    Callback = function(v)
-        RapidFire = v
-        if v then FireRateVal = 0.03 end
-    end
-})
-GunTab:Toggle({Title = "Instant Hit", Callback = function(v) InstantHit = v end})
-GunTab:Toggle({Title = "Auto Switch Target (สลับเป้าอัตโนมัติ)", Callback = function(v) AutoSwitchTarget = v end})
-
-GunTab:Section({Title = "Recoil / Spread / Scope"})
-GunTab:Toggle({Title = "No Recoil (ตัดแรงถีบ)", Callback = function(v) NoRecoil = v end})
-GunTab:Toggle({Title = "No Spread (กระสุนไม่กระจาย)", Callback = function(v) NoSpread = v end})
-GunTab:Toggle({Title = "Auto Scope / Unscope", Callback = function(v) AutoScope = v end})
-
-GunTab:Section({Title = "Reload / Ammo"})
-GunTab:Toggle({Title = "Auto Reload", Callback = function(v) AutoReloadEnabled = v end})
-GunTab:Slider({
-    Title
-
---[[ 
+--[[
     ==================================================
     [Dolly Hub PvP v3] [PART 4/4]
     UI — AIM · GUN · PVP UTILITY · VISUAL · MISC
@@ -931,7 +840,9 @@ AimTab:Dropdown({
     Title = "เลือกส่วนที่จะยิง",
     Values = {"ศีรษะ", "ลำตัว"},
     Default = "ศีรษะ",
-    Callback = function(v) end
+    Callback = function(v)
+        AimPart = (v == "ศีรษะ") and "Head" or "HumanoidRootPart"
+    end
 })
 AimTab:Slider({
     Title = "ขนาด POV",
@@ -1003,154 +914,5 @@ GunTab:Slider({
     Step = 0.01,
     Callback = function(v) TriggerDelay = v end
 })
-GunTab:Toggle({Title = "Auto Shoot", Callback = function(v) AutoShootEnabled = v end})
-GunTab:Toggle({Title = "Burst Shot (ยิงทีละ 2 นัด)", Callback = function(v) BurstTwoEnabled = v end})
-GunTab:Toggle({Title = "Auto Return Fire (ยิงโต้กลับ)", Callback = function(v) AutoReturnFire = v end})
-GunTab:Slider({
-    Title = "Fire Rate Delay",
-    Value = {Min = 0.03, Max = 1, Default = FireRateVal},
-    Step = 0.01,
-    Callback = function(v) FireRateVal = v end
-})
-GunTab:Toggle({
-    Title = "Rapid Fire (ยิงรัวสุด)",
-    Callback = function(v)
-        RapidFire = v
-        if v then FireRateVal = 0.03 end
-    end
-})
-GunTab:Toggle({Title = "Instant Hit", Callback = function(v) InstantHit = v end})
-GunTab:Toggle({Title = "Auto Switch Target (สลับเป้าอัตโนมัติ)", Callback = function(v) AutoSwitchTarget = v end})
+GunTab:Toggle({Title = "Auto Shoot
 
-GunTab:Section({Title = "Recoil / Spread / Scope"})
-GunTab:Toggle({Title = "No Recoil (ตัดแรงถีบ)", Callback = function(v) NoRecoil = v end})
-GunTab:Toggle({Title = "No Spread (กระสุนไม่กระจาย)", Callback = function(v) NoSpread = v end})
-GunTab:Toggle({Title = "Auto Scope / Unscope", Callback = function(v) AutoScope = v end})
-
-GunTab:Section({Title = "Reload / Ammo"})
-GunTab:Toggle({Title = "Auto Reload", Callback = function(v) AutoReloadEnabled = v end})
-GunTab:Slider({
-    Title = "Reload Speed (วินาที)",
-    Value = {Min = 0.05, Max = 2, Default = ReloadSpeedVal},
-    Step = 0.05,
-    Callback = function(v) ReloadSpeedVal = v end
-})
-
-GunTab:Section({Title = "God Mode"})
-GunTab:Toggle({
-    Title = "God Mode (HP ไม่ลด)",
-    Callback = function(v) GodModeEnabled = v end
-})
-
--- ═══════════════════════════════════════════════════════
--- TAB: PVP UTILITY
--- ═══════════════════════════════════════════════════════
-
-local UtilTab = Window:Tab({Title = "PvP Utility", Icon = "shield"})
-
-UtilTab:Section({Title = "Defense"})
-UtilTab:Toggle({
-    Title = "Anti-Flinch (ไม่ล้ม)",
-    Callback = function(v)
-        AntiFlinch = v
-        if LocalPlayer.Character then applyAntiFlinch(LocalPlayer.Character) end
-    end
-})
-UtilTab:Toggle({Title = "Anti-Stun (ไม่โดนสตัน)", Callback = function(v) AntiStun = v end})
-UtilTab:Toggle({Title = "Auto Dodge (หลบกระสุน)", Callback = function(v) AutoDodge = v end})
-UtilTab:Slider({
-    Title = "Dodge Range",
-    Value = {Min = 10, Max = 200, Default = DodgeRange},
-    Callback = function(v) DodgeRange = v end
-})
-
-UtilTab:Section({Title = "Alert"})
-UtilTab:Toggle({Title = "Health Alert (เตือน HP ต่ำ)", Callback = function(v) HealthAlert = v end})
-UtilTab:Slider({
-    Title = "HP แจ้งเตือน",
-    Value = {Min = 5, Max = 100, Default = HealthAlertHP},
-    Callback = function(v) HealthAlertHP = v end
-})
-UtilTab:Toggle({
-    Title = "Kill Notifier (แจ้งเมื่อฆ่า)",
-    Callback = function(v)
-        KillNotifier = v
-        if v then watchKills() end
-    end
-})
-
-UtilTab:Section({Title = "Respawn"})
-UtilTab:Toggle({Title = "Auto Respawn (เกิดอัตโนมัติ)", Callback = function(v) AutoRespawn = v end})
-
--- ═══════════════════════════════════════════════════════
--- TAB: VISUAL
--- ═══════════════════════════════════════════════════════
-
-local VisualTab = Window:Tab({Title = "Visual", Icon = "eye"})
-
-VisualTab:Section({Title = "ESP"})
-VisualTab:Toggle({Title = "ESP ชื่อ + ระยะ", Callback = function(v) ESP_ENABLED = v end})
-VisualTab:Toggle({Title = "Rainbow ESP (ไฮไลต์สีรุ้ง)", Callback = function(v) RAINBOW_ESP = v end})
-VisualTab:Toggle({Title = "NPC ESP", Callback = function(v) ESP_NPC_ENABLED = v end})
-
-VisualTab:Section({Title = "Hitbox"})
-VisualTab:Toggle({Title = "Hitbox Expand (ขยายตัว)", Callback = function(v) HitboxEnabled = v end})
-VisualTab:Slider({
-    Title = "Hitbox Size",
-    Value = {Min = 2, Max = 50, Default = HitboxSize},
-    Callback = function(v) HitboxSize = v end
-})
-VisualTab:Toggle({Title = "Big Head", Callback = function(v) BigHeadEnabled = v end})
-VisualTab:Slider({
-    Title = "Big Head Size",
-    Value = {Min = 2, Max = 30, Default = BigHeadSize},
-    Callback = function(v) BigHeadSize = v end
-})
-
-VisualTab:Section({Title = "Lighting"})
-VisualTab:Toggle({
-    Title = "Fullbright (สว่างทั้งแมพ)",
-    Callback = function(v)
-        FullbrightEnabled = v
-        if not v then
-            Lighting.Brightness = OriginalBrightness
-            Lighting.ClockTime  = OriginalClockTime
-        end
-    end
-})
-VisualTab:Slider({
-    Title = "Brightness",
-    Value = {Min = 0, Max = 5, Default = BrightnessVal},
-    Step = 0.1,
-    Callback = function(v) BrightnessVal = v end
-})
-
--- ═══════════════════════════════════════════════════════
--- TAB: MISC
--- ═══════════════════════════════════════════════════════
-
-local MiscTab = Window:Tab({Title = "Misc", Icon = "settings"})
-
-MiscTab:Section({Title = "Movement"})
-MiscTab:Toggle({Title = "WalkSpeed", Callback = function(v) WalkSpeedEnabled = v end})
-MiscTab:Slider({
-    Title = "WalkSpeed Value",
-    Value = {Min = 16, Max = 500, Default = WalkSpeedVal},
-    Callback = function(v) WalkSpeedVal = v end
-})
-MiscTab:Toggle({Title = "Infinite Jump", Callback = function(v) InfiniteJumpEnabled = v end})
-
-MiscTab:Section({Title = "Server"})
-MiscTab:Button({
-    Title = "Join Low Player Server",
-    Callback = function() joinLowPlayerServer() end
-})
-
-MiscTab:Section({Title = "Info"})
-MiscTab:Paragraph({Title = "Dolly Hub PvP v3 — ปลาตากแห้ง"})
-
--- ═══════════════════════════════════════════════════════
--- DONE
--- ═══════════════════════════════════════════════════════
-
-notify("Dolly Hub", "โหลดเสร็จแล้ว พร้อมใช้งาน", 5)
