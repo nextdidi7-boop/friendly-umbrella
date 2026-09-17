@@ -904,3 +904,241 @@ GunTab:Toggle({Title = "Auto Reload", Callback = function(v) AutoReloadEnabled =
 GunTab:Slider({
     Title
 
+--[[ 
+    ==================================================
+    [Dolly Hub PvP v3] [PART 4/4 - FULL]
+    UI — AIM · GUN · UTILITY · MISC · VISUAL
+    ==================================================
+]]
+
+local Window = WindUI:CreateWindow({
+    Title = "Dolly Hub",
+    Subtitle = "ปลาตากแห้งสคริปต์ที่ดีที่สุด",
+    Folder = "DollyHubConfig",
+    OpenButton = {Title = "Dolly Hub", Enabled = true}
+})
+
+-- ═══════════════════════════════════════════════════════
+-- TAB: AIM
+-- ═══════════════════════════════════════════════════════
+
+local AimTab = Window:Tab({Title = "Aim", Icon = "target"})
+
+AimTab:Section({Title = "Aimbot"})
+AimTab:Toggle({Title = "ล็อคหัว", Callback = function(v) CAMERA_LOCK = v end})
+AimTab:Toggle({Title = "ล็อคกระสุน (Silent Aim)", Callback = function(v) SilentAim = v end})
+AimTab:Dropdown({
+    Title = "เลือกส่วนที่จะยิง",
+    Values = {"ศีรษะ", "ลำตัว"},
+    Default = "ศีรษะ",
+    Callback = function(v) end
+})
+AimTab:Slider({
+    Title = "ขนาด POV",
+    Value = {Min = 40, Max = 4000, Default = FOV},
+    Callback = function(v) FOV = v end
+})
+AimTab:Slider({
+    Title = "ระยะล็อค",
+    Value = {Min = 100, Max = 12000, Default = MaxDistance},
+    Callback = function(v) MaxDistance = v end
+})
+
+AimTab:Section({Title = "Aim Behavior"})
+AimTab:Slider({
+    Title = "Aim Smoothness (นุ่ม = ค่าสูง)",
+    Value = {Min = 0.05, Max = 1, Default = AimSmoothness},
+    Step = 0.05,
+    Callback = function(v) AimSmoothness = v end
+})
+AimTab:Toggle({
+    Title = "Aim Prediction (ยิงล่วงหน้า)",
+    Callback = function(v) AimPrediction = v end
+})
+AimTab:Slider({
+    Title = "Prediction Amount",
+    Value = {Min = 0.05, Max = 0.5, Default = PredictionAmount},
+    Step = 0.01,
+    Callback = function(v) PredictionAmount = v end
+})
+AimTab:Dropdown({
+    Title = "Target Priority",
+    Values = {"Closest", "LowestHP", "FacingMe"},
+    Default = "Closest",
+    Callback = function(v) TargetPriority = v end
+})
+AimTab:Toggle({
+    Title = "Visible Check (ยิงเฉพาะที่มองเห็น)",
+    Default = true,
+    Callback = function(v) VisibleCheckOnly = v end
+})
+AimTab:Toggle({
+    Title = "Wallbang (ยิงทะลุกำแพง)",
+    Callback = function(v) WallbangEnabled = v end
+})
+AimTab:Toggle({
+    Title = "Sticky Aim (ล็อคเป้าเดิมจนตาย)",
+    Callback = function(v) StickyAim = v end
+})
+AimTab:Toggle({
+    Title = "Team Check",
+    Default = true,
+    Callback = function(v) TeamCheck = v end
+})
+
+-- ═══════════════════════════════════════════════════════
+-- TAB: GUN
+-- ═══════════════════════════════════════════════════════
+
+local GunTab = Window:Tab({Title = "Gun", Icon = "crosshair"})
+
+GunTab:Section({Title = "Firing"})
+GunTab:Toggle({
+    Title = "Trigger Bot (ยิงเมื่อเล็งโดน)",
+    Callback = function(v) TriggerBot = v end
+})
+GunTab:Slider({
+    Title = "Trigger Delay",
+    Value = {Min = 0.01, Max = 0.5, Default = TriggerDelay},
+    Step = 0.01,
+    Callback = function(v) TriggerDelay = v end
+})
+GunTab:Toggle({Title = "Auto Shoot", Callback = function(v) AutoShootEnabled = v end})
+GunTab:Toggle({Title = "Burst Shot (ยิงทีละ 2 นัด)", Callback = function(v) BurstTwoEnabled = v end})
+GunTab:Toggle({Title = "Auto Return Fire (ยิงโต้กลับ)", Callback = function(v) AutoReturnFire = v end})
+GunTab:Slider({
+    Title = "Fire Rate Delay",
+    Value = {Min = 0.03, Max = 1, Default = FireRateVal},
+    Step = 0.01,
+    Callback = function(v) FireRateVal = v end
+})
+GunTab:Toggle({
+    Title = "Rapid Fire (ยิงรัวสุด)",
+    Callback = function(v)
+        RapidFire = v
+        if v then FireRateVal = 0.03 end
+    end
+})
+GunTab:Toggle({Title = "Instant Hit", Callback = function(v) InstantHit = v end})
+GunTab:Toggle({Title = "Auto Switch Target (สลับเป้าอัตโนมัติ)", Callback = function(v) AutoSwitchTarget = v end})
+
+GunTab:Section({Title = "Recoil / Spread / Scope"})
+GunTab:Toggle({Title = "No Recoil (ตัดแรงถีบ)", Callback = function(v) NoRecoil = v end})
+GunTab:Toggle({Title = "No Spread (กระสุนไม่กระจาย)", Callback = function(v) NoSpread = v end})
+GunTab:Toggle({Title = "Auto Scope / Unscope", Callback = function(v) AutoScope = v end})
+
+GunTab:Section({Title = "Reload / Ammo"})
+GunTab:Toggle({Title = "Auto Reload", Callback = function(v) AutoReloadEnabled = v end})
+GunTab:Slider({
+    Title = "Reload Speed (วินาที)",
+    Value = {Min = 0.05, Max = 2, Default = ReloadSpeedVal},
+    Step = 0.05,
+    Callback = function(v) ReloadSpeedVal = v end
+})
+
+GunTab:Section({Title = "God / Auto"})
+GunTab:Toggle({Title = "God Mode (HP ไม่ลด)", Callback = function(v) GodModeEnabled = v end})
+
+-- ═══════════════════════════════════════════════════════
+-- TAB: PVP UTILITY
+-- ═══════════════════════════════════════════════════════
+
+local UtilTab = Window:Tab({Title = "PvP Utility", Icon = "shield"})
+
+UtilTab:Section({Title = "Defense"})
+UtilTab:Toggle({Title = "Anti-Flinch (ไม่ล้ม)", Callback = function(v)
+    AntiFlinch = v
+    if LocalPlayer.Character then applyAntiFlinch(LocalPlayer.Character) end
+end})
+UtilTab:Toggle({Title = "Anti-Stun (ไม่โดนสตัน)", Callback = function(v) AntiStun = v end})
+UtilTab:Toggle({Title = "Auto Dodge (หลบกระสุน)", Callback = function(v) AutoDodge = v end})
+UtilTab:Slider({
+    Title = "Dodge Range",
+    Value = {Min = 10, Max = 200, Default = DodgeRange},
+    Callback = function(v) DodgeRange = v end
+})
+
+UtilTab:Section({Title = "Alert"})
+UtilTab:Toggle({Title = "Health Alert (เตือน HP ต่ำ)", Callback = function(v) HealthAlert = v end})
+UtilTab:Slider({
+    Title = "HP แจ้งเตือน",
+    Value = {Min = 5, Max = 100, Default = HealthAlertHP},
+    Callback = function(v) HealthAlertHP = v end
+})
+UtilTab:Toggle({Title = "Kill Notifier (แจ้งเมื่อฆ่า)", Callback = function(v)
+    KillNotifier = v
+    if v then watchKills() end
+end})
+
+UtilTab:Section({Title = "Respawn"})
+UtilTab:Toggle({Title = "Auto Respawn (เกิดอัตโนมัติ)", Callback = function(v) AutoRespawn = v end})
+
+-- ═══════════════════════════════════════════════════════
+-- TAB: VISUAL / ESP
+-- ═══════════════════════════════════════════════════════
+
+local VisualTab = Window:Tab({Title = "Visual", Icon = "eye"})
+
+VisualTab:Section({Title = "ESP"})
+VisualTab:Toggle({Title = "ESP ชื่อ + ระยะ", Callback = function(v) ESP_ENABLED = v end})
+VisualTab:Toggle({Title = "Rainbow ESP (ไฮไลต์สีรุ้ง)", Callback = function(v) RAINBOW_ESP = v end})
+VisualTab:Toggle({Title = "NPC ESP", Callback = function(v) ESP_NPC_ENABLED = v end})
+
+VisualTab:Section({Title = "Hitbox"})
+VisualTab:Toggle({Title = "Hitbox Expand (ขยายตัว)", Callback = function(v) HitboxEnabled = v end})
+VisualTab:Slider({
+    Title = "Hitbox Size",
+    Value = {Min = 2, Max = 50, Default = HitboxSize},
+    Callback = function(v) HitboxSize = v end
+})
+VisualTab:Toggle({Title = "Big Head", Callback = function(v) BigHeadEnabled = v end})
+VisualTab:Slider({
+    Title = "Big Head Size",
+    Value = {Min = 2, Max = 30, Default = BigHeadSize},
+    Callback = function(v) BigHeadSize = v end
+})
+
+VisualTab:Section({Title = "Lighting"})
+VisualTab:Toggle({Title = "Fullbright (สว่างทั้งแมพ)", Callback = function(v)
+    FullbrightEnabled = v
+    if not v then
+        Lighting.Brightness = OriginalBrightness
+        Lighting.ClockTime  = OriginalClockTime
+    end
+end})
+VisualTab:Slider({
+    Title = "Brightness",
+    Value = {Min = 0, Max = 5, Default = BrightnessVal},
+    Step = 0.1,
+    Callback = function(v) BrightnessVal = v end
+})
+
+-- ═══════════════════════════════════════════════════════
+-- TAB: MISC
+-- ═══════════════════════════════════════════════════════
+
+local MiscTab = Window:Tab({Title = "Misc", Icon = "settings"})
+
+MiscTab:Section({Title = "Movement"})
+MiscTab:Toggle({Title = "WalkSpeed", Callback = function(v) WalkSpeedEnabled = v end})
+MiscTab:Slider({
+    Title = "WalkSpeed Value",
+    Value = {Min = 16, Max = 500, Default = WalkSpeedVal},
+    Callback = function(v) WalkSpeedVal = v end
+})
+MiscTab:Toggle({Title = "Infinite Jump", Callback = function(v) InfiniteJumpEnabled = v end})
+
+MiscTab:Section({Title = "Server"})
+MiscTab:Button({
+    Title = "Join Low Player Server",
+    Callback = function() joinLowPlayerServer() end
+})
+
+MiscTab:Section({Title = "Info"})
+MiscTab:Paragraph({Title = "Dolly Hub PvP v3 — ปลาตากแห้ง"})
+
+-- ═══════════════════════════════════════════════════════
+-- DONE
+-- ═══════════════════════════════════════════════════════
+
+notify("Dolly Hub", "โหลดเสร็จแล้ว พร้อมใช้งาน", 5)
