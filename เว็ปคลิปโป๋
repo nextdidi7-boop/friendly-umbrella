@@ -1,0 +1,450 @@
+require('dotenv').config();
+const express = require('express');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+const multer = require('multer');
+const sqlite3 = require('sqlite3').verbose();
+const path = require('path');
+const fs = require('fs');
+
+const app = express();
+app.use(express.json());
+
+// สร้างโฟลเดอร์สำหรับเก็บไฟล์วิดีโออัปโหลด
+const uploadDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadDir)) {
+    fs.mkdirSync(uploadDir);
+}
+
+// --------------------------------------------------
+// 1. ตั้งค่า Database (SQLite)
+// --------------------------------------------------
+const db = new sqlite3.Database('./video_platform.db', (err) => {
+    if (err) console.error('Database connection error:', err);
+    else console.log('Connected to SQLite database.');
+});
+
+db.serialize(() => {
+    // ตาราง Users
+    db.run(`
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            password TEXT NOT NULL,
+            role TEXT NOT NULL DEFAULT 'user'
+        )
+    `);
+
+    // ตาราง Videos
+    db.run(`
+        CREATE TABLE IF NOT EXISTS videos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            description TEXT,
+            filename TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    `);
+
+    // สร้าง Admin เริ่มต้น (Username: admin, Password: adminpassword)
+    const adminUser = 'admin';
+    const adminPass = 'adminpassword';
+    db.get(`SELECT id FROM users WHERE username = ?`, [adminUser], (err, row) => {
+        if (!row) {
+            const hash = bcrypt.hashSync(adminPass, 10);
+            db.run(`INSERT INTO users (username, password, role) VALUES (?, ?, ?)`, [adminUser, hash, 'admin']);
+            console.log('-------------------------------------------');
+            console.log('สร้างบัญชี Admin เริ่มต้นเรียบร้อย!');
+            console.log(`Username: ${adminUser}`);
+            console.log(`Password: ${adminPass}`);
+            console.log('-------------------------------------------');
+        }
+    });
+});
+
+app.use('/uploads', express.static(uploadDir));
+
+// --------------------------------------------------
+// 2. ตั้งค่า Multer (จัดเก็บไฟล์ลงดิสก์)
+// --------------------------------------------------
+const storage = multer.diskStorage({
+    destination: (req, file, cb) => cb(null, uploadDir),
+    filename: (req, file, cb) => {
+        const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+        const ext = path.extname(file.originalname);
+        cb(null, 'video-' + uniqueSuffix + ext);
+    }
+});
+
+const upload = multer({
+    storage: storage,
+    fileFilter: (req, file, cb) => {
+        if (file.mimetype.startsWith('video/')) cb(null, true);
+        else cb(new Error('อนุญาตเฉพาะไฟล์วิดีโอเท่านั้น'), false);
+    }
+});
+
+// --------------------------------------------------
+// 3. Middleware ตรวจสอบสิทธิ์ Admin
+// --------------------------------------------------
+const verifyAdmin = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) return res.status(401).json({ message: 'กรุณาเข้าสู่ระบบก่อน' });
+
+    jwt.verify(token, process.env.JWT_SECRET || 'fallback_secret', (err, decoded) => {
+        if (err || decoded.role !== 'admin') {
+            return res.status(403).json({ message: 'สิทธิ์ไม่ถูกต้อง (สำหรับ Admin เท่านั้น)' });
+        }
+        req.user = decoded;
+        next();
+    });
+};
+
+// --------------------------------------------------
+// 4. API Endpoints
+// --------------------------------------------------
+
+// [POST] ล็อกอิน Admin
+app.post('/api/login', (req, res) => {
+    const { username, password } = req.body;
+    db.get(`SELECT * FROM users WHERE username = ?`, [username], (err, user) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!user) return res.status(400).json({ message: 'ไม่พบบัญชีผู้ใช้นี้' });
+
+        const isMatch = bcrypt.compareSync(password, user.password);
+        if (!isMatch) return res.status(400).json({ message: 'รหัสผ่านไม่ถูกต้อง' });
+
+        const token = jwt.sign(
+            { id: user.id, username: user.username, role: user.role },
+            process.env.JWT_SECRET || 'fallback_secret',
+            { expiresIn: '1d' }
+        );
+
+        res.json({ message: 'เข้าสู่ระบบสำเร็จ', token, role: user.role });
+    });
+});
+
+// [GET] ดึงวิดีโอทั้งหมด
+app.get('/api/videos', (req, res) => {
+    db.all(`SELECT * FROM videos ORDER BY created_at DESC`, [], (err, rows) => {
+        if (err) return res.status(500).json({ error: err.message });
+        const videos = rows.map(v => ({
+            id: v.id,
+            title: v.title,
+            description: v.description,
+            video_url: `/uploads/${v.filename}`,
+            created_at: v.created_at
+        }));
+        res.json(videos);
+    });
+});
+
+// [POST] เพิ่มวิดีโอใหม่ (เฉพาะ Admin)
+app.post('/api/videos', verifyAdmin, upload.single('video'), (req, res) => {
+    if (!req.file) return res.status(400).json({ message: 'กรุณาแนบไฟล์วิดีโอ' });
+    const { title, description } = req.body;
+    const filename = req.file.filename;
+
+    db.run(`INSERT INTO videos (title, description, filename) VALUES (?, ?, ?)`,
+        [title || req.file.originalname, description || '', filename],
+        function (err) {
+            if (err) return res.status(500).json({ error: err.message });
+            res.status(201).json({ message: 'เพิ่มวิดีโอสำเร็จ', videoId: this.lastID });
+        }
+    );
+});
+
+// [PUT] แก้ไขชื่อและรายละเอียดวิดีโอ (เฉพาะ Admin)
+app.put('/api/videos/:id', verifyAdmin, (req, res) => {
+    const videoId = req.params.id;
+    const { title, description } = req.body;
+
+    db.run(`UPDATE videos SET title = ?, description = ? WHERE id = ?`,
+        [title, description, videoId],
+        function (err) {
+            if (err) return res.status(500).json({ error: err.message });
+            if (this.changes === 0) return res.status(404).json({ message: 'ไม่พบวิดีโอนี้' });
+            res.json({ message: 'แก้ไขข้อมูลวิดีโอสำเร็จ' });
+        }
+    );
+});
+
+// [DELETE] ลบวิดีโอ (เฉพาะ Admin)
+app.delete('/api/videos/:id', verifyAdmin, (req, res) => {
+    const videoId = req.params.id;
+    db.get(`SELECT filename FROM videos WHERE id = ?`, [videoId], (err, row) => {
+        if (err) return res.status(500).json({ error: err.message });
+        if (!row) return res.status(404).json({ message: 'ไม่พบวิดีโอนี้' });
+
+        const filePath = path.join(uploadDir, row.filename);
+        fs.unlink(filePath, () => {
+            db.run(`DELETE FROM videos WHERE id = ?`, [videoId], (dbErr) => {
+                if (dbErr) return res.status(500).json({ error: dbErr.message });
+                res.json({ message: 'ลบวิดีโอเรียบร้อยแล้ว' });
+            });
+        });
+    });
+});
+
+// --------------------------------------------------
+// 5. Frontend UI (ส่งไฟล์ HTML เมื่อเปิดหน้าแรก)
+// --------------------------------------------------
+app.get('/', (req, res) => {
+    res.send(`
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Streaming Platform</title>
+    <style>
+        * { box-sizing: border-box; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        body { background-color: #121212; color: #fff; margin: 0; padding: 20px; }
+        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #333; padding-bottom: 15px; margin-bottom: 20px; }
+        h1 { margin: 0; color: #ff0055; }
+        button { background: #ff0055; color: white; border: none; padding: 10px 18px; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        button:hover { background: #d00045; }
+        .btn-secondary { background: #444; }
+        .btn-secondary:hover { background: #666; }
+        .btn-danger { background: #cc0000; }
+        .btn-danger:hover { background: #990000; }
+        
+        /* Grid วิดีโอ */
+        .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .video-card { background: #1e1e1e; border-radius: 8px; overflow: hidden; padding: 10px; border: 1px solid #333; }
+        video { width: 100%; height: 180px; background: #000; border-radius: 5px; }
+        .video-card h3 { margin: 10px 0 5px 0; font-size: 1.1rem; }
+        .video-card p { color: #aaa; font-size: 0.9rem; margin-bottom: 10px; }
+        .action-buttons { display: flex; gap: 8px; margin-top: 10px; }
+
+        /* Modal Popup */
+        .modal { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); justify-content: center; align-items: center; }
+        .modal-content { background: #222; padding: 25px; border-radius: 8px; width: 350px; text-align: center; }
+        .modal-content input, .modal-content textarea { width: 100%; padding: 10px; margin: 10px 0; background: #333; border: 1px solid #444; color: white; border-radius: 4px; }
+        .admin-panel { background: #1a2634; border: 1px solid #2c3e50; padding: 20px; border-radius: 8px; margin-bottom: 20px; display: none; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>🎬 Video Platform</h1>
+        <div id="nav-actions">
+            <button onclick="openLoginModal()" id="btn-login">🔑 เข้าสู่ระบบ Admin</button>
+            <button onclick="logoutAdmin()" id="btn-logout" style="display:none;" class="btn-secondary">🚪 ออกจากระบบ</button>
+        </div>
+    </header>
+
+    <!-- Admin Panel (แสดงเมื่อล็อกอินสำเร็จ) -->
+    <div id="admin-panel" class="admin-panel">
+        <h2>📌 Admin Control Panel (เพิ่มวิดีโอใหม่)</h2>
+        <form id="upload-form">
+            <input type="text" id="up-title" placeholder="ชื่อวิดีโอ" required style="width: 100%; padding: 8px; margin-bottom: 10px;">
+            <textarea id="up-desc" placeholder="รายละเอียดวิดีโอ" style="width: 100%; padding: 8px; margin-bottom: 10px;"></textarea>
+            <input type="file" id="up-file" accept="video/*" required style="margin-bottom: 10px; color: white;">
+            <br>
+            <button type="submit">➕ อัปโหลดวิดีโอ</button>
+        </form>
+    </div>
+
+    <!-- รายการวิดีโอทั้งหมด -->
+    <h2>วิดีโอทั้งหมด</h2>
+    <div id="video-list" class="video-grid"></div>
+
+    <!-- Modal ล็อกอิน -->
+    <div id="login-modal" class="modal">
+        <div class="modal-content">
+            <h3>🔑 ล็อกอินสำหรับ Admin</h3>
+            <input type="text" id="admin-user" placeholder="Username (เช่น admin)">
+            <input type="password" id="admin-pass" placeholder="Password">
+            <button onclick="loginAdmin()">เข้าสู่ระบบ</button>
+            <button onclick="closeLoginModal()" class="btn-secondary">ยกเลิก</button>
+        </div>
+    </div>
+
+    <!-- Modal แก้ไขข้อมูล -->
+    <div id="edit-modal" class="modal">
+        <div class="modal-content">
+            <h3>✏️ แก้ไขข้อมูลวิดีโอ</h3>
+            <input type="hidden" id="edit-id">
+            <input type="text" id="edit-title" placeholder="ชื่อวิดีโอ">
+            <textarea id="edit-desc" placeholder="รายละเอียด"></textarea>
+            <button onclick="saveEditVideo()">บันทึกการเปลี่ยนแปลง</button>
+            <button onclick="closeEditModal()" class="btn-secondary">ยกเลิก</button>
+        </div>
+    </div>
+
+    <script>
+        let adminToken = localStorage.getItem('adminToken') || '';
+
+        window.onload = () => {
+            checkAdminStatus();
+            loadVideos();
+        };
+
+        function checkAdminStatus() {
+            const adminPanel = document.getElementById('admin-panel');
+            const btnLogin = document.getElementById('btn-login');
+            const btnLogout = document.getElementById('btn-logout');
+
+            if (adminToken) {
+                adminPanel.style.display = 'block';
+                btnLogin.style.display = 'none';
+                btnLogout.style.display = 'inline-block';
+            } else {
+                adminPanel.style.display = 'none';
+                btnLogin.style.display = 'inline-block';
+                btnLogout.style.display = 'none';
+            }
+        }
+
+        // --- ระบบ Authentication ---
+        function openLoginModal() { document.getElementById('login-modal').style.display = 'flex'; }
+        function closeLoginModal() { document.getElementById('login-modal').style.display = 'none'; }
+
+        async function loginAdmin() {
+            const username = document.getElementById('admin-user').value;
+            const password = document.getElementById('admin-pass').value;
+
+            const res = await fetch('/api/login', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ username, password })
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                adminToken = data.token;
+                localStorage.setItem('adminToken', adminToken);
+                alert('ล็อกอินสำเร็จ!');
+                closeLoginModal();
+                checkAdminStatus();
+                loadVideos();
+            } else {
+                alert(data.message || 'ล็อกอินไม่สำเร็จ');
+            }
+        }
+
+        function logoutAdmin() {
+            localStorage.removeItem('adminToken');
+            adminToken = '';
+            checkAdminStatus();
+            loadVideos();
+        }
+
+        // --- ระบบจัดการวิดีโอ ---
+        async function loadVideos() {
+            const res = await fetch('/api/videos');
+            const videos = await res.json();
+            const container = document.getElementById('video-list');
+            container.innerHTML = '';
+
+            videos.forEach(v => {
+                const card = document.createElement('div');
+                card.className = 'video-card';
+                
+                let adminActions = '';
+                if (adminToken) {
+                    adminActions = \`
+                        <div class="action-buttons">
+                            <button class="btn-secondary" onclick="openEditModal(\${v.id}, '\${v.title}', '\${v.description}')">✏️ แก้ไข</button>
+                            <button class="btn-danger" onclick="deleteVideo(\${v.id})">🗑️ ลบ</button>
+                        </div>
+                    \`;
+                }
+
+                card.innerHTML = \`
+                    <video controls src="\${v.video_url}"></video>
+                    <h3>\${v.title}</h3>
+                    <p>\${v.description || 'ไม่มีรายละเอียด'}</p>
+                    \${adminActions}
+                \`;
+                container.appendChild(card);
+            });
+        }
+
+        // เพิ่มวิดีโอ
+        document.getElementById('upload-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const formData = new FormData();
+            formData.append('title', document.getElementById('up-title').value);
+            formData.append('description', document.getElementById('up-desc').value);
+            formData.append('video', document.getElementById('up-file').files[0]);
+
+            const res = await fetch('/api/videos', {
+                method: 'POST',
+                headers: { 'Authorization': 'Bearer ' + adminToken },
+                body: formData
+            });
+
+            if (res.ok) {
+                alert('เพิ่มวิดีโอสำเร็จ!');
+                document.getElementById('upload-form').reset();
+                loadVideos();
+            } else {
+                alert('เกิดข้อผิดพลาดในการอัปโหลด');
+            }
+        });
+
+        // แก้ไขวิดีโอ
+        function openEditModal(id, title, desc) {
+            document.getElementById('edit-id').value = id;
+            document.getElementById('edit-title').value = title;
+            document.getElementById('edit-desc').value = desc;
+            document.getElementById('edit-modal').style.display = 'flex';
+        }
+        function closeEditModal() { document.getElementById('edit-modal').style.display = 'none'; }
+
+        async function saveEditVideo() {
+            const id = document.getElementById('edit-id').value;
+            const title = document.getElementById('edit-title').value;
+            const description = document.getElementById('edit-desc').value;
+
+            const res = await fetch('/api/videos/' + id, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + adminToken
+                },
+                body: JSON.stringify({ title, description })
+            });
+
+            if (res.ok) {
+                alert('แก้ไขวิดีโอสำเร็จ');
+                closeEditModal();
+                loadVideos();
+            } else {
+                alert('ไม่สามารถแก้ไขวิดีโอได้');
+            }
+        }
+
+        // ลบวิดีโอ
+        async function deleteVideo(id) {
+            if (!confirm('ยืนยันที่จะลบวิดีโอนี้?')) return;
+
+            const res = await fetch('/api/videos/' + id, {
+                method: 'DELETE',
+                headers: { 'Authorization': 'Bearer ' + adminToken }
+            });
+
+            if (res.ok) {
+                alert('ลบวิดีโอสำเร็จ');
+                loadVideos();
+            } else {
+                alert('ไม่สามารถลบวิดีโอได้');
+            }
+        }
+    </script>
+</body>
+</html>
+    `);
+});
+
+// --------------------------------------------------
+// Start Server
+// --------------------------------------------------
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
+});
