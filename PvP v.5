@@ -293,7 +293,202 @@ _G.GetClosestTarget = GetClosestTarget
 _G.IsShootingBurst = IsShootingBurst
 _G.LastShootTime = LastShootTime
 --========================================================
--- [PART 3/4] ESP SYSTEM & UPDATER LOOPS
+-- [PART 2/4] COMBAT, AIMBOT & PHYSICS LOGIC (FIXED)
+--========================================================
+
+local Players = game:GetService("Players")
+local Workspace = game:GetService("Workspace")
+local VirtualUser = game:GetService("VirtualUser")
+local Camera = Workspace.CurrentCamera
+local LocalPlayer = Players.LocalPlayer
+
+local IsReloading = false
+local IsShootingBurst = false
+local LastShootTime = 0
+
+local CreatedBoobParts = {}
+local LeftMeshWeld, RightMeshWeld = nil, nil
+local BaseLeftC0 = CFrame.new(-0.42, 0.1, -0.52)
+local BaseRightC0 = CFrame.new(0.42, 0.1, -0.52)
+
+local function GetRainbow(speed)
+    local t = (tick() * (speed or 1)) % 5 / 5
+    return Color3.fromHSV(t, 1, 1)
+end
+
+local function isAlive(char)
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    return hum and hum.Health > 0
+end
+
+local function isTeammate(p)
+    if not _G.Settings.TeamCheck then return false end
+    if not LocalPlayer.Team or not p.Team then return false end
+    return p.Team == LocalPlayer.Team
+end
+
+local function getEquippedTool()
+    return LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+end
+
+local RayParams = RaycastParams.new()
+RayParams.FilterType = Enum.RaycastFilterType.Exclude
+RayParams.IgnoreWater = true
+
+local function GetClosestTarget()
+    local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local closest, target = _G.Settings.FOVSize, nil
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and isAlive(p.Character) and not isTeammate(p) then
+            local part = p.Character:FindFirstChild(_G.Settings.AimPart) or p.Character:FindFirstChild("Head")
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if part and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= _G.Settings.MaxDistance then
+                local s, on = Camera:WorldToViewportPoint(part.Position)
+                if on then
+                    local d = (Vector2.new(s.X, s.Y) - center).Magnitude
+                    if d < closest then
+                        closest = d
+                        target = part
+                    end
+                end
+            end
+        end
+    end
+    return target
+end
+
+-- ระบบยิงปืน
+local function fireGun()
+    if IsReloading then return end
+    local tool = getEquippedTool()
+    if tool then
+        tool:Activate()
+        VirtualUser:Button1Down(Vector2.new(0, 0), Camera.CFrame)
+        task.wait(_G.Settings.FireRateVal)
+        VirtualUser:Button1Up(Vector2.new(0, 0), Camera.CFrame)
+        tool:Deactivate()
+    end
+end
+
+-- ยิงทีละ 2 นัด (Burst Fire)
+local function fireBurstTwo()
+    if IsReloading or IsShootingBurst then return end
+    IsShootingBurst = true
+    fireGun()
+    task.wait(0.04)
+    fireGun()
+    IsShootingBurst = false
+end
+
+local function fastReload()
+    if IsReloading then return end
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local tool = getEquippedTool()
+    if hum and tool then
+        IsReloading = true
+        task.wait(_G.Settings.ReloadSpeedVal)
+        hum:UnequipTools()
+        task.wait(0.02)
+        hum:EquipTool(tool)
+        IsReloading = false
+    end
+end
+
+-- Silent Aim Hook: ดักจับและเปลี่ยนทิศทางกระสุนไปยังเป้าหมาย โดยไม่แตะต้องกล้องของผู้เล่น
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local method = getnamecallmethod()
+    local args = {...}
+
+    if _G.Settings.SilentAim and not checkcaller() then
+        if method == "Raycast" then
+            local target = GetClosestTarget()
+            if target then
+                local origin = args[1]
+                args[2] = (target.Position - origin).Unit * _G.Settings.MaxDistance
+                return oldNamecall(self, unpack(args))
+            end
+        elseif method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "FindPartOnRay" then
+            local target = GetClosestTarget()
+            if target then
+                local ray = args[1]
+                if ray then
+                    args[1] = Ray.new(ray.Origin, (target.Position - ray.Origin).Unit * _G.Settings.MaxDistance)
+                    return oldNamecall(self, unpack(args))
+                end
+            end
+        end
+    end
+
+    return oldNamecall(self, ...)
+end)
+
+_G.DestroyBoobs = function()
+    for _, v in ipairs(CreatedBoobParts) do
+        if v and v.Parent then pcall(function() v:Destroy() end) end
+    end
+    CreatedBoobParts = {}
+    LeftMeshWeld, RightMeshWeld = nil, nil
+end
+
+_G.BuildSoftBoob = function(char)
+    _G.DestroyBoobs()
+    if not char or not char.Parent then return end
+
+    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    local head = char:FindFirstChild("Head")
+    if not torso then return end
+
+    local skinCol = head and head.Color or torso.Color
+    local pink1, pink2 = Color3.fromRGB(255, 130, 155), Color3.fromRGB(255, 80, 120)
+    local s = _G.BoobSettings.Size
+
+    local function createSphere(cf, size, col, parentWeld)
+        local p = Instance.new("Part")
+        p.Shape = Enum.PartType.Ball
+        p.Size = size
+        p.Color = col
+        p.Material = Enum.Material.SmoothPlastic
+        p.CanCollide = false
+        p.Massless = true
+        p.Parent = char
+
+        local w = Instance.new("Weld")
+        w.Part0 = parentWeld or torso
+        w.Part1 = p
+        w.C0 = cf
+        w.Parent = p
+
+        table.insert(CreatedBoobParts, p)
+        return p, w
+    end
+
+    local lMain, lW = createSphere(BaseLeftC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
+    local rMain, rW = createSphere(BaseRightC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
+    LeftMeshWeld, RightMeshWeld = lW, rW
+
+    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, lMain)
+    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, rMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, lMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, rMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, lMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, rMain)
+end
+
+_G.GetRainbow = GetRainbow
+_G.isAlive = isAlive
+_G.isTeammate = isTeammate
+_G.getEquippedTool = getEquippedTool
+_G.fireGun = fireGun
+_G.fireBurstTwo = fireBurstTwo
+_G.fastReload = fastReload
+_G.GetClosestTarget = GetClosestTarget
+_G.IsShootingBurst = IsShootingBurst
+_G.LastShootTime = LastShootTime
+--========================================================
+-- [PART 3/4] ESP SYSTEM & UPDATER LOOPS (FIXED CAMERA)
 --========================================================
 
 local Players = game:GetService("Players")
@@ -605,7 +800,7 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- ลูปอัปเดตตำแหน่งเส้นชี้เป้าและการยิง
+-- ลูปอัปเดตเส้นชี้เป้า (ปรับแก้ไม่ให้ยุ่งกับ Camera.CFrame)
 RunService.RenderStepped:Connect(function()
     FOVCircle.Visible = _G.Settings.FOVEnabled
     local Size = math.clamp(_G.Settings.FOVSize, 1, 300)
@@ -616,6 +811,7 @@ RunService.RenderStepped:Connect(function()
     local Target = GetClosestTarget()
 
     if Target then
+        -- Aimbot ปกติ (จะหมุนเฉพาะเมื่อเปิดใช้งาน AimbotEnabled เท่านั้น)
         if _G.Settings.AimbotEnabled then
             local CurrentCF = Camera.CFrame
             local TargetCF = CFrame.lookAt(CurrentCF.Position, Target.Position)
@@ -626,7 +822,7 @@ RunService.RenderStepped:Connect(function()
             Camera.CFrame = CFrame.new(Camera.CFrame.Position, Target.Position)
         end
 
-        -- วาดเส้นสีแดงชี้ตรงเข้าหัวเป้าหมาย
+        -- วาดเส้นสีแดงจากกลางจอไปหาหัวเป้าหมาย (Silent Aim ทำงานอิสระโดยไม่ล็อคกล้อง)
         if _G.Settings.SilentAim then
             local p, onScreen = Camera:WorldToViewportPoint(Target.Position)
             if onScreen then
@@ -668,7 +864,6 @@ UserInputService.JumpRequest:Connect(function()
     end
 end)
 
--- ยิง 2 นัดซ้อนเมื่อคลิกยิงเอง
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
@@ -726,279 +921,3 @@ _G.joinLowPlayerServer = function()
         end
     end
 end
---========================================================
--- [PART 4/4] WINDUI INTERFACE
---========================================================
-
-local WindUI = _G.WindUIInstance
-local Settings = _G.Settings
-local BoobSettings = _G.BoobSettings
-
-local Window = WindUI:CreateWindow({
-    Title = "BLOCKSPIN MOBILE HUB (ALL-IN-ONE)",
-    Icon = "crosshair",
-    Author = "BOON Hun & Refactored",
-    Folder = "BlockSpinHubMaster"
-})
-
--- TAB: COMBAT & AIMBOT
-local CombatTab = Window:Tab({ Title = "ระบบต่อสู้ & เล็ง", Icon = "crosshair" })
-
-CombatTab:Toggle({
-    Title = "เปิด Silent Aim (กระสุนเข้าหัว + เส้นสีแดง)",
-    Value = Settings.SilentAim,
-    Callback = function(v) Settings.SilentAim = v end
-})
-
-CombatTab:Toggle({
-    Title = "เปิดใช้งาน Aimbot (หมุนกล้องตาม)",
-    Value = Settings.AimbotEnabled,
-    Callback = function(v) Settings.AimbotEnabled = v end
-})
-
-CombatTab:Toggle({
-    Title = "Camera Lock (ล็อคตรงทันที)",
-    Value = Settings.CameraLock,
-    Callback = function(v) Settings.CameraLock = v end
-})
-
-CombatTab:Dropdown({
-    Title = "ส่วนที่ต้องการล็อค",
-    Values = {"Head", "HumanoidRootPart"},
-    Value = Settings.AimPart,
-    Callback = function(v) Settings.AimPart = v end
-})
-
-CombatTab:Slider({
-    Title = "ความลื่นล็อค (Aimbot Smoothness)",
-    Step = 0.05,
-    Value = { Min = 0.05, Max = 1, Default = Settings.Smoothness },
-    Callback = function(v) Settings.Smoothness = v end
-})
-
-CombatTab:Toggle({
-    Title = "ไม่ล็อค/ยิง เพื่อนร่วมทีม",
-    Value = Settings.TeamCheck,
-    Callback = function(v) Settings.TeamCheck = v end
-})
-
--- TAB: GUN MODS
-local GunTab = Window:Tab({ Title = "ปรับแต่งปืน", Icon = "zap" })
-
-GunTab:Toggle({
-    Title = "ยิงทีละ 2 นัด (Burst Two)",
-    Value = Settings.BurstTwoEnabled,
-    Callback = function(v) Settings.BurstTwoEnabled = v end
-})
-
-GunTab:Toggle({
-    Title = "Auto Shoot (ยิงอัตโนมัติเมื่อล็อคเป้า)",
-    Value = Settings.AutoShootEnabled,
-    Callback = function(v) Settings.AutoShootEnabled = v end
-})
-
-GunTab:Toggle({
-    Title = "Auto Return Fire (ยิงสวนอัตโนมัติเมื่อโดนยิง)",
-    Value = Settings.AutoReturnFire,
-    Callback = function(v) Settings.AutoReturnFire = v end
-})
-
-GunTab:Toggle({
-    Title = "Auto Reload (รีโหลดไวอัตโนมัติ)",
-    Value = Settings.AutoReloadEnabled,
-    Callback = function(v) Settings.AutoReloadEnabled = v end
-})
-
-GunTab:Slider({
-    Title = "ความเร็วการยิง (Fire Delay Rate)",
-    Step = 0.01,
-    Value = { Min = 0.01, Max = 0.5, Default = Settings.FireRateVal },
-    Callback = function(v) Settings.FireRateVal = v end
-})
-
-GunTab:Slider({
-    Title = "ความเร็วรีโหลด (Fast Reload Speed)",
-    Step = 0.05,
-    Value = { Min = 0.05, Max = 1, Default = Settings.ReloadSpeedVal },
-    Callback = function(v) Settings.ReloadSpeedVal = v end
-})
-
--- TAB: FOV
-local FOVTab = Window:Tab({ Title = "วงกลม FOV", Icon = "circle" })
-
-FOVTab:Toggle({
-    Title = "แสดงวง FOV",
-    Value = Settings.FOVEnabled,
-    Callback = function(v) Settings.FOVEnabled = v end
-})
-
-FOVTab:Slider({
-    Title = "ขนาดวง FOV",
-    Step = 1,
-    Value = { Min = 1, Max = 300, Default = Settings.FOVSize },
-    Callback = function(v) Settings.FOVSize = v end
-})
-
-FOVTab:Toggle({
-    Title = "วง FOV สีรุ้ง",
-    Value = Settings.RainbowFOV,
-    Callback = function(v) Settings.RainbowFOV = v end
-})
-
--- TAB: HITBOX & MODS
-local ModTab = Window:Tab({ Title = "ฮิตบ็อกซ์ & ตัวละคร", Icon = "user-check" })
-
-ModTab:Toggle({
-    Title = "ขยาย Hitbox ตัวผู้เล่น",
-    Value = Settings.HitboxEnabled,
-    Callback = function(v) Settings.HitboxEnabled = v end
-})
-
-ModTab:Slider({
-    Title = "ขนาด Hitbox ตัว",
-    Step = 1,
-    Value = { Min = 2, Max = 30, Default = Settings.HitboxSize },
-    Callback = function(v) Settings.HitboxSize = v end
-})
-
-ModTab:Toggle({
-    Title = "ขยายส่วนหัว (Big Head)",
-    Value = Settings.BigHeadEnabled,
-    Callback = function(v) Settings.BigHeadEnabled = v end
-})
-
-ModTab:Slider({
-    Title = "ขนาดหัว Big Head",
-    Step = 1,
-    Value = { Min = 2, Max = 20, Default = Settings.BigHeadSize },
-    Callback = function(v) Settings.BigHeadSize = v end
-})
-
-ModTab:Toggle({
-    Title = "ปรับความเร็วการเดิน (WalkSpeed)",
-    Value = Settings.WalkSpeedEnabled,
-    Callback = function(v) Settings.WalkSpeedEnabled = v end
-})
-
-ModTab:Slider({
-    Title = "ความเร็ว WalkSpeed",
-    Step = 1,
-    Value = { Min = 16, Max = 200, Default = Settings.WalkSpeedVal },
-    Callback = function(v) Settings.WalkSpeedVal = v end
-})
-
-ModTab:Toggle({
-    Title = "Infinite Jump (กระโดดไม่จำกัด)",
-    Value = Settings.InfiniteJumpEnabled,
-    Callback = function(v) Settings.InfiniteJumpEnabled = v end
-})
-
-ModTab:Toggle({
-    Title = "God Mode (เติมเลือดฝั่ง Client)",
-    Value = Settings.GodModeEnabled,
-    Callback = function(v) Settings.GodModeEnabled = v end
-})
-
--- TAB: ESP & VISUALS
-local VisualTab = Window:Tab({ Title = "ระบบแสดงผล (ESP)", Icon = "eye" })
-
-VisualTab:Toggle({
-    Title = "มองชื่อผู้เล่น",
-    Value = Settings.NameESP,
-    Callback = function(v) Settings.NameESP = v; _G.RefreshPlayerESP() end
-})
-
-VisualTab:Toggle({
-    Title = "มองหลอดเลือด (HP)",
-    Value = Settings.HealthESP,
-    Callback = function(v) Settings.HealthESP = v; _G.RefreshPlayerESP() end
-})
-
-VisualTab:Toggle({
-    Title = "มองของที่ผู้เล่นถือ",
-    Value = Settings.ToolESP,
-    Callback = function(v) Settings.ToolESP = v; _G.RefreshPlayerESP() end
-})
-
-VisualTab:Toggle({
-    Title = "กรอบเรืองแสงผู้เล่น (Highlight)",
-    Value = Settings.HighlightESP,
-    Callback = function(v) Settings.HighlightESP = v; _G.RefreshPlayerESP() end
-})
-
-VisualTab:Toggle({
-    Title = "กรอบเรืองแสงสีรุ้ง (Rainbow Chams)",
-    Value = Settings.RainbowESP,
-    Callback = function(v) Settings.RainbowESP = v; _G.RefreshPlayerESP() end
-})
-
-VisualTab:Toggle({
-    Title = "มอง NPC ในแมพ",
-    Value = Settings.NPC_ESP,
-    Callback = function(v) Settings.NPC_ESP = v end
-})
-
-VisualTab:Toggle({
-    Title = "มองของ/ไอเทมในแมพ",
-    Value = Settings.WorldESP,
-    Callback = function(v)
-        Settings.WorldESP = v
-        if v then
-            task.spawn(function()
-                while Settings.WorldESP do _G.ScanWorld(); task.wait(2) end
-            end)
-        else
-            _G.ClearWorldESP()
-        end
-    end
-})
-
--- TAB: MISC & FUN PHYSICS
-local MiscTab = Window:Tab({ Title = "ระบบเสริม & เซิร์ฟเวอร์", Icon = "sliders" })
-
-MiscTab:Toggle({
-    Title = "เปิดใช้งาน Boob Physics (Soft-Body)",
-    Value = BoobSettings.Enabled,
-    Callback = function(v)
-        BoobSettings.Enabled = v
-        if v and game.Players.LocalPlayer.Character then
-            _G.BuildSoftBoob(game.Players.LocalPlayer.Character)
-        else
-            _G.DestroyBoobs()
-        end
-    end
-})
-
-MiscTab:Slider({
-    Title = "ขนาด Boob Physics",
-    Step = 0.1,
-    Value = { Min = 0.5, Max = 3, Default = BoobSettings.Size },
-    Callback = function(v)
-        BoobSettings.Size = v
-        if BoobSettings.Enabled and game.Players.LocalPlayer.Character then
-            _G.BuildSoftBoob(game.Players.LocalPlayer.Character)
-        end
-    end
-})
-
-MiscTab:Toggle({
-    Title = "Fullbright (สว่างทั้งแมพ)",
-    Value = Settings.FullbrightEnabled,
-    Callback = function(v)
-        Settings.FullbrightEnabled = v
-        if not v then
-            game:GetService("Lighting").Brightness = 1
-            game:GetService("Lighting").ClockTime = 12
-        end
-    end
-})
-
-MiscTab:Button({
-    Title = "ย้ายไปเซิร์ฟเวอร์ที่มีคนน้อย (Server Hop)",
-    Callback = function()
-        _G.joinLowPlayerServer()
-    end
-})
-
-_G.RefreshPlayerESP()
-print("BLOCKSPIN MASTER COMBAT & ESP HUB LOADED SUCCESSFULLY!")
