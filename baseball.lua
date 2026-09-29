@@ -1,575 +1,423 @@
-local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
-local CoreGui = game:GetService("CoreGui")
+task.spawn(function()  
+  
+local Library = loadstring([==[
+if not LPH_OBFUSCATED then
+	LPH_ENCFUNC = function(callback)
+		return callback
+	end
+	LPH_NO_VIRTUALIZE = function(...)
+		return ...
+	end
+	LPH_NO_UPVALUES = function(...)
+		return ...
+	end
+	LPH_JIT_MAX = function(...)
+		return ...
+	end
+	LPH_JIT = function(...)
+		return ...
+	end
+end
+
+local _cloneref = cloneref
+
+local user_input_service = _cloneref(game:GetService('UserInputService'))
+local tween_service = _cloneref(game:GetService('TweenService'))
+local text_service = _cloneref(game:GetService('TextService'))
+local http_service = _cloneref(game:GetService('HttpService'))
+local core_gui = _cloneref(game:GetService('CoreGui'))
+local debris = _cloneref(game:GetService('Debris'))
+
+local NEXTSHOP_BG = Color3.fromRGB(12, 13, 17)
+local NEXTSHOP_PANEL = Color3.fromRGB(18, 19, 24)
+local NEXTSHOP_PANEL_2 = Color3.fromRGB(22, 23, 29)
+local NEXTSHOP_HOVER = Color3.fromRGB(30, 31, 39)
+local NEXTSHOP_ACCENT = Color3.fromRGB(255, 72, 92)
+local NEXTSHOP_ACCENT_DARK = Color3.fromRGB(145, 34, 50)
+local NEXTSHOP_PURPLE = Color3.fromRGB(165, 92, 255)
+local NEXTSHOP_BLUE = Color3.fromRGB(72, 145, 255)
+local NEXTSHOP_CYAN = Color3.fromRGB(64, 220, 255)
+local NEXTSHOP_GREEN = Color3.fromRGB(72, 220, 145)
+local NEXTSHOP_GOLD = Color3.fromRGB(255, 190, 72)
+local NEXTSHOP_TEXT = Color3.fromRGB(245, 245, 248)
+local NEXTSHOP_MUTED = Color3.fromRGB(155, 158, 168)
+local _new_instance = Instance.new
+local _new_tween_info = TweenInfo.new
+local _new_udim = UDim.new
+local _new_udim2 = UDim2.new
+local _udim2_from_offset = UDim2.fromOffset
+local _new_vector2 = Vector2.new
+
+local _clamp = math.clamp
+local _floor = math.floor
+local _max = math.max
+local _min = math.min
+
+local _clear = table.clear
+local _find = table.find
+local _freeze = table.freeze
+local _insert = table.insert
+local _pack = table.pack
+local _unpack = table.unpack
+
+local _defer = task.defer
+local _delay = task.delay
+local _create_tween = tween_service.Create
+
+local _pairs = pairs
+local _pcall = pcall
+local _tostring = tostring
+local _type = type
+
+local create_runtime_lua_key = function(left, right)
+	return left .. right .. _tostring(game.GameId):sub(1, 0)
+end
 
 local library = {
-    flags = {},
-    categories = {},
-    theme = {
-        background = Color3.fromRGB(24, 24, 28),
-        category_bg = Color3.fromRGB(30, 30, 35),
-        tab_bg = Color3.fromRGB(38, 38, 45),
-        group_bg = Color3.fromRGB(45, 45, 55),
-        accent = Color3.fromRGB(85, 170, 255),
-        text = Color3.fromRGB(255, 255, 255),
-        text_dark = Color3.fromRGB(170, 170, 180),
-        border = Color3.fromRGB(60, 60, 70)
-    }
+	_config = {},
+	_flags = {},
+	_current = nil,
+}
+library.__index = library
+ type tab_typeof = {
+	_btn: TextButton,
+	_left: ScrollingFrame,
+	_right: ScrollingFrame,
+	_active: boolean,
+	_enabled: boolean,
+	_title: string,
+	_category: string?,
+	_manager: any,
 }
 
--- สร้าง ScreenGui สำหรับ UI
-local screen_gui = Instance.new("ScreenGui")
-screen_gui.Name = "VirexLibrary"
-screen_gui.ResetOnSpawn = false
+type runtime_default = {
+	_tab: number,
+	_tabs: { tab_typeof },
+	_tab_registry: { [string]: { any } },
+	_categories: { any },
+	_category_registry: { [string]: { any } },
+	_active_tab: tab_typeof?,
+	_layout_order: number,
+	_category_order: number,
+	_manager_loaded: boolean,
+	_type: string?,
+	_config: { [string]: any },
+	_flags: { [string]: any },
+	_active_dropdowns: { any },
+	_keybind_entries: { any },
+	_keybind_list_visible: boolean,
+	_is_mobile: boolean,
+	_ui_scale: number,
+	_label_text_size: number,
+	_small_text_size: number,
+	_ui_open: boolean,
+	_dragging: boolean,
+	_drag_start: Vector2?,
+	_container_position: UDim2?,
+	_ui: ScreenGui?,
+	_container: Frame?,
+	_sidebar: Frame?,
+	_pin: Frame?,
+	_tabs_container: ScrollingFrame?,
+	_main_content: Frame?,
+	_sections: Folder?,
+	_topbar: Frame?,
+	_ui_scale_object: UIScale?,
+	_keybind_scale: UIScale?,
+	_keybind_list_content: Frame?,
+	_keybind_list_frame: Frame?,
+	_notification_holder: Frame?,
+	_notification_scale: UIScale?,
+	_notification_order: number,
+	_apply_scale: (() -> ())?,
+	_lua_manager: any?,
+}
 
-if syn and syn.protect_gui then
-    syn.protect_gui(screen_gui)
-    screen_gui.Parent = CoreGui
-elseif gethui then
-    screen_gui.Parent = gethui()
-else
-    screen_gui.Parent = CoreGui
+type _runtime = typeof(setmetatable({} :: runtime_default, library))
+type runtime_typeof = _runtime | typeof(library)
+
+local interface_parent = (gethui and gethui()) or core_gui
+local old_interface = interface_parent:FindFirstChild('_nextshop')
+
+if old_interface then
+	debris:AddItem(old_interface, 0)
+        end
+local create_new = LPH_NO_VIRTUALIZE(function(class_name, properties)
+	local instance = _new_instance(class_name)
+
+	for property, value in properties do
+		if property ~= 'Parent' then
+			instance[property] = value
+		end
+	end
+
+	instance.Parent = properties.Parent
+
+	return instance
+end)
+
+local create_round = LPH_NO_VIRTUALIZE(function(instance, radius)
+	return create_new('UICorner', {
+		CornerRadius = _new_udim(0, radius),
+		Parent = instance,
+	})
+end)
+
+local create_pill = LPH_NO_VIRTUALIZE(function(instance)
+	return create_new('UICorner', {
+		CornerRadius = _new_udim(1, 0),
+		Parent = instance,
+	})
+end)
+
+local create_outline = LPH_NO_VIRTUALIZE(function(instance, refresh)
+	local stroke = create_new('UIStroke', {
+		Color = Color3.fromRGB(48, 50, 60),
+		Thickness = 1,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Parent = instance,
+	})
+
+	if refresh then
+		instance:GetPropertyChangedSignal('AbsoluteSize'):Connect(function()
+			stroke.Enabled = false
+			stroke.Enabled = true
+		end)
+	end
+
+	return stroke
+end)
+local create_vertical_list = LPH_NO_VIRTUALIZE(function(instance, gap)
+	return create_new('UIListLayout', {
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = _new_udim(0, gap or 0),
+		Parent = instance,
+	})
+end)
+
+local create_padding = LPH_NO_VIRTUALIZE(function(instance, top, bottom, left, right)
+	return create_new('UIPadding', {
+		PaddingTop = _new_udim(0, top),
+		PaddingBottom = _new_udim(0, bottom),
+		PaddingLeft = _new_udim(0, left),
+		PaddingRight = _new_udim(0, right),
+		Parent = instance,
+	})
+end)
+
+local create_label = LPH_NO_VIRTUALIZE(function(properties)
+	properties.BackgroundTransparency = 1
+	properties.FontFace =
+		Font.new('rbxasset://fonts/families/GothamSSm.json', Enum.FontWeight.SemiBold, Enum.FontStyle.Normal)
+	properties.TextColor3 = properties.TextColor3 or Color3.fromRGB(180, 180, 180)
+	properties.BorderSizePixel = 0
+
+	return create_new('TextLabel', properties)
+end)
+
+local create_divider = LPH_NO_VIRTUALIZE(function(parent, position, size)
+	return create_new('Frame', {
+		BackgroundColor3 = Color3.fromRGB(35, 35, 35),
+		Position = position,
+		Size = size,
+		BorderSizePixel = 0,
+		Parent = parent,
+	})
+end)
+local normalize_name = LPH_NO_VIRTUALIZE(function(value)
+	local normalized = string.lower(_tostring(value or ''))
+	normalized = string.gsub(normalized, '^%s+', '')
+
+	return string.gsub(normalized, '%s+$', '')
+end)
+
+local shallow_copy = LPH_NO_VIRTUALIZE(function(source)
+	local copy = {}
+
+	for index, value in source or {} do
+		copy[index] = value
+	end
+
+	return copy
+end)
+
+local round_number = LPH_NO_VIRTUALIZE(function(number, decimals)
+	local multiplier = 10 ^ (decimals or 0)
+
+	return _floor(number * multiplier + 0.5 - (number < 0 and 1 or 0)) / multiplier
+end)
+
+if not isfolder('NEXTSHOP') then
+	makefolder('NEXTSHOP')
 end
 
--- ระบบแจ้งเตือน (Notify)
-function library:notify(options)
-    options = options or {}
-    local title = options.title or "Notification"
-    local text = options.text or ""
-    local duration = options.duration or 3
-
-    local notify_frame = Instance.new("Frame")
-    notify_frame.Size = UDim2.new(0, 220, 0, 60)
-    notify_frame.Position = UDim2.new(1, -230, 1, -70)
-    notify_frame.BackgroundColor3 = library.theme.group_bg
-    notify_frame.BorderSizePixel = 0
-    notify_frame.Parent = screen_gui
-
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent = notify_frame
-
-    local title_lbl = Instance.new("TextLabel")
-    title_lbl.Size = UDim2.new(1, -20, 0, 20)
-    title_lbl.Position = UDim2.new(0, 10, 0, 5)
-    title_lbl.Text = title
-    title_lbl.TextColor3 = library.theme.accent
-    title_lbl.Font = Enum.Font.SourceSansBold
-    title_lbl.TextSize = 16
-    title_lbl.TextXAlignment = Enum.TextXAlignment.Left
-    title_lbl.BackgroundTransparency = 1
-    title_lbl.Parent = notify_frame
-
-    local text_lbl = Instance.new("TextLabel")
-    text_lbl.Size = UDim2.new(1, -20, 0, 30)
-    text_lbl.Position = UDim2.new(0, 10, 0, 25)
-    text_lbl.Text = text
-    text_lbl.TextColor3 = library.theme.text
-    text_lbl.Font = Enum.Font.SourceSans
-    text_lbl.TextSize = 14
-    text_lbl.TextXAlignment = Enum.TextXAlignment.Left
-    text_lbl.TextWrapped = true
-    text_lbl.BackgroundTransparency = 1
-    text_lbl.Parent = notify_frame
-
-    task.delay(duration, function()
-        if notify_frame then notify_frame:Destroy() end
-    end)
-end
--- 1. ฟังก์ชันสร้าง Category ( library:create_category )
-function library:create_category(name)
-    local category = {
-        name = name,
-        tabs = {}
-    }
-
-    local cat_frame = Instance.new("Frame")
-    cat_frame.Name = name .. "_Category"
-    cat_frame.Size = UDim2.new(0, 550, 0, 380)
-    cat_frame.Position = UDim2.new(0.5, -275, 0.5, -190)
-    cat_frame.BackgroundColor3 = library.theme.background
-    cat_frame.BorderSizePixel = 0
-    cat_frame.Active = true
-    cat_frame.Draggable = true
-    cat_frame.Parent = screen_gui
-
-    local cat_corner = Instance.new("UICorner")
-    cat_corner.CornerRadius = UDim.new(0, 8)
-    cat_corner.Parent = cat_frame
-
-    local title_lbl = Instance.new("TextLabel")
-    title_lbl.Size = UDim2.new(1, -20, 0, 30)
-    title_lbl.Position = UDim2.new(0, 10, 0, 5)
-    title_lbl.Text = name
-    title_lbl.TextColor3 = library.theme.text
-    title_lbl.Font = Enum.Font.SourceSansBold
-    title_lbl.TextSize = 18
-    title_lbl.TextXAlignment = Enum.TextXAlignment.Left
-    title_lbl.BackgroundTransparency = 1
-    title_lbl.Parent = cat_frame
-
-    local tab_bar = Instance.new("Frame")
-    tab_bar.Size = UDim2.new(0, 130, 1, -45)
-    tab_bar.Position = UDim2.new(0, 10, 0, 38)
-    tab_bar.BackgroundColor3 = library.theme.category_bg
-    tab_bar.BorderSizePixel = 0
-    tab_bar.Parent = cat_frame
-
-    local tab_bar_corner = Instance.new("UICorner")
-    tab_bar_corner.CornerRadius = UDim.new(0, 6)
-    tab_bar_corner.Parent = tab_bar
-
-    local tab_layout = Instance.new("UIListLayout")
-    tab_layout.SortOrder = Enum.SortOrder.LayoutOrder
-    tab_layout.Padding = UDim.new(0, 5)
-    tab_layout.Parent = tab_bar
-
-    local container_frame = Instance.new("Frame")
-    container_frame.Size = UDim2.new(1, -160, 1, -45)
-    container_frame.Position = UDim2.new(0, 150, 0, 38)
-    container_frame.BackgroundTransparency = 1
-    container_frame.Parent = cat_frame
-
-    -- 2. ฟังก์ชันสร้าง Tab ( category:create_tab )
-    function category:create_tab(title, icon)
-        local tab = {
-            title = title,
-            groups = {}
-        }
-
-        local tab_btn = Instance.new("TextButton")
-        tab_btn.Size = UDim2.new(1, 0, 0, 32)
-        tab_btn.BackgroundColor3 = library.theme.tab_bg
-        tab_btn.Text = "  " .. title
-        tab_btn.TextColor3 = library.theme.text_dark
-        tab_btn.Font = Enum.Font.SourceSans
-        tab_btn.TextSize = 14
-        tab_btn.TextXAlignment = Enum.TextXAlignment.Left
-        tab_btn.BorderSizePixel = 0
-        tab_btn.Parent = tab_bar
-
-        local btn_corner = Instance.new("UICorner")
-        btn_corner.CornerRadius = UDim.new(0, 4)
-        btn_corner.Parent = tab_btn
-
-        local tab_page = Instance.new("Frame")
-        tab_page.Size = UDim2.new(1, 0, 1, 0)
-        tab_page.BackgroundTransparency = 1
-        tab_page.Visible = false
-        tab_page.Parent = container_frame
-
-        local left_side = Instance.new("ScrollingFrame")
-        left_side.Size = UDim2.new(0.48, 0, 1, 0)
-        left_side.Position = UDim2.new(0, 0, 0, 0)
-        left_side.BackgroundTransparency = 1
-        left_side.ScrollBarThickness = 2
-        left_side.Parent = tab_page
-
-        local left_layout = Instance.new("UIListLayout")
-        left_layout.SortOrder = Enum.SortOrder.LayoutOrder
-        left_layout.Padding = UDim.new(0, 10)
-        left_layout.Parent = left_side
-
-        local right_side = Instance.new("ScrollingFrame")
-        right_side.Size = UDim2.new(0.48, 0, 1, 0)
-        right_side.Position = UDim2.new(0.52, 0, 0, 0)
-        right_side.BackgroundTransparency = 1
-        right_side.ScrollBarThickness = 2
-        right_side.Parent = tab_page
-
-        local right_layout = Instance.new("UIListLayout")
-        right_layout.SortOrder = Enum.SortOrder.LayoutOrder
-        right_layout.Padding = UDim.new(0, 10)
-        right_layout.Parent = right_side
-
-        tab_btn.MouseButton1Click:Connect(function()
-            for _, t in pairs(category.tabs) do
-                t.page.Visible = false
-                t.button.TextColor3 = library.theme.text_dark
-            end
-            tab_page.Visible = true
-            tab_btn.TextColor3 = library.theme.accent
-        end)
-
-        if #category.tabs == 0 then
-            tab_page.Visible = true
-            tab_btn.TextColor3 = library.theme.accent
-        end
-
-        tab.page = tab_page
-        tab.button = tab_btn
-        tab.left_side = left_side
-        tab.right_side = right_side
-
-        -- (ส่วนที่ 3 จะมาเชื่อมกับ tab:create_group ตรงนี้)
-        return tab
-    end
-
-    table.insert(library.categories, category)
-    return category
-end
--- ต่อจากส่วนที่ 2: ฟังก์ชันสร้าง Group และ Controls ย่อย
-local function apply_group_methods(tab)
-    -- 3. ฟังก์ชันสร้าง Group ( tab:create_group )
-    function tab:create_group(title, side)
-        local group = {}
-        local parent_side = (side == "right") and tab.right_side or tab.left_side
-
-        local group_frame = Instance.new("Frame")
-        group_frame.Size = UDim2.new(1, -5, 0, 40)
-        group_frame.BackgroundColor3 = library.theme.group_bg
-        group_frame.BorderSizePixel = 0
-        group_frame.Parent = parent_side
-
-        local group_corner = Instance.new("UICorner")
-        group_corner.CornerRadius = UDim.new(0, 6)
-        group_corner.Parent = group_frame
-
-        local group_title = Instance.new("TextLabel")
-        group_title.Size = UDim2.new(1, -10, 0, 25)
-        group_title.Position = UDim2.new(0, 10, 0, 2)
-        group_title.Text = title
-        group_title.TextColor3 = library.theme.accent
-        group_title.Font = Enum.Font.SourceSansBold
-        group_title.TextSize = 14
-        group_title.TextXAlignment = Enum.TextXAlignment.Left
-        group_title.BackgroundTransparency = 1
-        group_title.Parent = group_frame
-
-        local group_layout = Instance.new("UIListLayout")
-        group_layout.SortOrder = Enum.SortOrder.LayoutOrder
-        group_layout.Padding = UDim.new(0, 5)
-        group_layout.Parent = group_frame
-
-        local function update_group_size()
-            local total_height = group_layout.AbsoluteContentSize.Y + 15
-            group_frame.Size = UDim2.new(1, -5, 0, total_height)
-        end
-        group_layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(update_group_size)
-
-        -- 4. ฟังก์ชันสร้าง Elements ต่างๆ ใน Group ( group:create_... )
-
-        -- Toggle
-        function group:create_toggle(flag, values)
-            values = values or {}
-            local text = values.title or flag
-            local default = values.default or false
-            local callback = values.callback or function() end
-
-            library.flags[flag] = default
-
-            local toggle_btn = Instance.new("TextButton")
-            toggle_btn.Size = UDim2.new(1, -16, 0, 25)
-            toggle_btn.Position = UDim2.new(0, 8, 0, 0)
-            toggle_btn.BackgroundTransparency = 1
-            toggle_btn.Text = "  " .. text
-            toggle_btn.TextColor3 = default and library.theme.text or library.theme.text_dark
-            toggle_btn.Font = Enum.Font.SourceSans
-            toggle_btn.TextSize = 13
-            toggle_btn.TextXAlignment = Enum.TextXAlignment.Left
-            toggle_btn.Parent = group_frame
-
-            local box = Instance.new("Frame")
-            box.Size = UDim2.new(0, 16, 0, 16)
-            box.Position = UDim2.new(1, -20, 0.5, -8)
-            box.BackgroundColor3 = default and library.theme.accent or library.theme.tab_bg
-            box.BorderSizePixel = 0
-            box.Parent = toggle_btn
-
-            local box_corner = Instance.new("UICorner")
-            box_corner.CornerRadius = UDim.new(0, 4)
-            box_corner.Parent = box
-
-            toggle_btn.MouseButton1Click:Connect(function()
-                library.flags[flag] = not library.flags[flag]
-                local state = library.flags[flag]
-                box.BackgroundColor3 = state and library.theme.accent or library.theme.tab_bg
-                toggle_btn.TextColor3 = state and library.theme.text or library.theme.text_dark
-                callback(state)
-            end)
-        end
-
-        -- Button
-        function group:create_button(values)
-            values = values or {}
-            local text = values.title or "Button"
-            local callback = values.callback or function() end
-
-            local btn = Instance.new("TextButton")
-            btn.Size = UDim2.new(1, -16, 0, 26)
-            btn.BackgroundColor3 = library.theme.tab_bg
-            btn.Text = text
-            btn.TextColor3 = library.theme.text
-            btn.Font = Enum.Font.SourceSans
-            btn.TextSize = 13
-            btn.BorderSizePixel = 0
-            btn.Parent = group_frame
-
-            local btn_corner = Instance.new("UICorner")
-            btn_corner.CornerRadius = UDim.new(0, 4)
-            btn_corner.Parent = btn
-
-            btn.MouseButton1Click:Connect(function()
-                callback()
-            end)
-        end
-
-        -- Slider
-        function group:create_slider(flag, values)
-            values = values or {}
-            local text = values.title or flag
-            local min = values.min or 0
-            local max = values.max or 100
-            local default = values.default or min
-            local callback = values.callback or function() end
-
-            library.flags[flag] = default
-
-            local slider_frame = Instance.new("Frame")
-            slider_frame.Size = UDim2.new(1, -16, 0, 40)
-            slider_frame.BackgroundTransparency = 1
-            slider_frame.Parent = group_frame
-
-            local lbl = Instance.new("TextLabel")
-            lbl.Size = UDim2.new(1, 0, 0, 18)
-            lbl.Text = text .. ": " .. tostring(default)
-            lbl.TextColor3 = library.theme.text
-            lbl.Font = Enum.Font.SourceSans
-            lbl.TextSize = 13
-            lbl.TextXAlignment = Enum.TextXAlignment.Left
-            lbl.BackgroundTransparency = 1
-            lbl.Parent = slider_frame
-
-            local bar = Instance.new("Frame")
-            bar.Size = UDim2.new(1, 0, 0, 8)
-            bar.Position = UDim2.new(0, 0, 0, 22)
-            bar.BackgroundColor3 = library.theme.tab_bg
-            bar.BorderSizePixel = 0
-            bar.Parent = slider_frame
-
-            local fill = Instance.new("Frame")
-            fill.Size = UDim2.new((default - min) / (max - min), 0, 1, 0)
-            fill.BackgroundColor3 = library.theme.accent
-            fill.BorderSizePixel = 0
-            fill.Parent = bar
-
-            -- Simple Slider Drag Logic
-            local dragging = false
-            bar.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                    dragging = true
-                end
-            end)
-            UserInputService.InputEnded:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                    dragging = false
-                end
-            end)
-            UserInputService.InputChanged:Connect(function(input)
-                if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-                    local pos = math.clamp((input.Position.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
-                    local val = math.floor(min + (max - min) * pos)
-                    fill.Size = UDim2.new(pos, 0, 1, 0)
-                    lbl.Text = text .. ": " .. tostring(val)
-                    library.flags[flag] = val
-                    callback(val)
-                end
-            end)
-        end
-
-        -- Textbox
-        function group:create_textbox(flag, values)
-            values = values or {}
-            local text = values.title or flag
-            local default = values.default or ""
-            local callback = values.callback or function() end
-
-            library.flags[flag] = default
-
-            local box_frame = Instance.new("Frame")
-            box_frame.Size = UDim2.new(1, -16, 0, 30)
-            box_frame.BackgroundTransparency = 1
-            box_frame.Parent = group_frame
-
-            local tb = Instance.new("TextBox")
-            tb.Size = UDim2.new(1, 0, 1, 0)
-            tb.BackgroundColor3 = library.theme.tab_bg
-            tb.Text = default ~= "" and default or text
-            tb.TextColor3 = library.theme.text
-            tb.Font = Enum.Font.SourceSans
-            tb.TextSize = 13
-            tb.BorderSizePixel = 0
-            tb.Parent = box_frame
-
-            local tb_corner = Instance.new("UICorner")
-            tb_corner.CornerRadius = UDim.new(0, 4)
-            tb_corner.Parent = tb
-
-            tb.FocusLost:Connect(function()
-                library.flags[flag] = tb.Text
-                callback(tb.Text)
-            end)
-        end
-
-        -- Dropdown
-        function group:create_dropdown(flag, values)
-            values = values or {}
-            local text = values.title or flag
-            local list = values.list or {}
-            local default = values.default or list[1]
-            local callback = values.callback or function() end
-
-            library.flags[flag] = default
-
-            local dd_btn = Instance.new("TextButton")
-            dd_btn.Size = UDim2.new(1, -16, 0, 26)
-            dd_btn.BackgroundColor3 = library.theme.tab_bg
-            dd_btn.Text = text .. ": " .. tostring(default)
-            dd_btn.TextColor3 = library.theme.text
-            dd_btn.Font = Enum.Font.SourceSans
-            dd_btn.TextSize = 13
-            dd_btn.BorderSizePixel = 0
-            dd_btn.Parent = group_frame
-
-            local dd_corner = Instance.new("UICorner")
-            dd_corner.CornerRadius = UDim.new(0, 4)
-            dd_corner.Parent = dd_btn
-
-            local count = 0
-            dd_btn.MouseButton1Click:Connect(function()
-                count = count + 1
-                local selected = list[(count % #list) + 1] or list[1]
-                dd_btn.Text = text .. ": " .. tostring(selected)
-                library.flags[flag] = selected
-                callback(selected)
-            end)
-        end
-
-        -- Keybind
-        function group:create_keybind(flag, values)
-            values = values or {}
-            local text = values.title or flag
-            local default = values.default or Enum.KeyCode.E
-            local callback = values.callback or function() end
-
-            library.flags[flag] = default
-
-            local kb_btn = Instance.new("TextButton")
-            kb_btn.Size = UDim2.new(1, -16, 0, 26)
-            kb_btn.BackgroundColor3 = library.theme.tab_bg
-            kb_btn.Text = text .. ": " .. default.Name
-            kb_btn.TextColor3 = library.theme.text
-            kb_btn.Font = Enum.Font.SourceSans
-            kb_btn.TextSize = 13
-            kb_btn.BorderSizePixel = 0
-            kb_btn.Parent = group_frame
-
-            local kb_corner = Instance.new("UICorner")
-            kb_corner.CornerRadius = UDim.new(0, 4)
-            kb_corner.Parent = kb_btn
-
-            local binding = false
-            kb_btn.MouseButton1Click:Connect(function()
-                kb_btn.Text = text .. ": Press Key..."
-                binding = true
-            end)
-
-            UserInputService.InputBegan:Connect(function(input)
-                if binding and input.UserInputType == Enum.UserInputType.Keyboard then
-                    binding = false
-                    library.flags[flag] = input.KeyCode
-                    kb_btn.Text = text .. ": " .. input.KeyCode.Name
-                    callback(input.KeyCode)
-                end
-            end)
-        end
-
-        return group
-    end
+if not isfolder('NEXTSHOP/configs') then
+	makefolder('NEXTSHOP/configs')
 end
 
--- Hook ฟังก์ชันให้กับ Tab
-local old_create_tab = library.categories
--- Hook ระบบ Tab ให้สามารถเรียกสร้าง Group ได้สมบูรณ์
-local raw_create_cat = library.create_category
-function library:create_category(name)
-    local cat = raw_create_cat(self, name)
-    local raw_create_tab = cat.create_tab
-    function cat:create_tab(title, icon)
-        local tab = raw_create_tab(self, title, icon)
-        apply_group_methods(tab)
-        return tab
-    end
-    return cat
+function library._save(self: runtime_typeof)
+	return true
 end
 
--- =============================================================
--- ตัวอย่างการนำไปใช้งานทันที (Example Usage)
--- =============================================================
+function library.load(self: runtime_typeof)
+	return self._flags
+end
 
--- 1. สร้าง Main Window (Category)
-local MainCategory = library:create_category("Virex Hub")
-
--- 2. สร้าง Tab
-local MainTab = MainCategory:create_tab("Main", "")
-local SettingsTab = MainCategory:create_tab("Settings", "")
-
--- 3. สร้าง Group ด้านซ้ายและขวา
-local FarmGroup = MainTab:create_group("Auto Farm Options", "left")
-local PlayerGroup = MainTab:create_group("Player Settings", "right")
-
--- 4. เพิ่ม Controls ต่างๆ
-FarmGroup:create_toggle("autofarm", {
-    title = "Enable Auto Farm",
-    default = false,
-    callback = function(state)
-        print("Auto Farm:", state)
-    end
-})
-
-FarmGroup:create_dropdown("selected_mode", {
-    title = "Farm Mode",
-    list = {"Level", "Coins", "Items"},
-    default = "Level",
-    callback = function(selected)
-        print("Selected Mode:", selected)
-    end
-})
-
-PlayerGroup:create_slider("walkspeed", {
-    title = "Walk Speed",
-    min = 16,
-    max = 100,
-    default = 16,
-    callback = function(value)
-        if game.Players.LocalPlayer.Character then
-            game.Players.LocalPlayer.Character.Humanoid.WalkSpeed = value
+function library.close_all_dropdowns(self: _runtime)
+	for _, dropdown in self._active_dropdowns do
+		if dropdown._state then
+			dropdown:unfold()
+		end
+	end
         end
-    end
-})
+ library._new = function(runtime_type: string?): _runtime
+	local is_mobile = user_input_service.TouchEnabled
+		or not (user_input_service.KeyboardEnabled and user_input_service.MouseEnabled)
+	local self = setmetatable({
+		_tab = 0,
+		_tabs = {},
+		_tab_registry = {},
+		_categories = {},
+		_category_registry = {},
+		_active_tab = nil,
+		_layout_order = 0,
+		_category_order = 0,
+		_manager_loaded = false,
+		_type = runtime_type,
+		_config = library._config,
+		_flags = library._flags,
+		_active_dropdowns = {},
+		_keybind_entries = {},
+		_keybind_list_visible = false,
+		_is_mobile = is_mobile,
+		_ui_scale = 1,
+		_label_text_size = is_mobile and 15 or 14,
+		_small_text_size = is_mobile and 11 or 10,
+		_ui_open = true,
+		_dragging = false,
+		_drag_start = nil,
+		_container_position = nil,
+		_ui = nil,
+		_container = nil,
+		_sidebar = nil,
+		_pin = nil,
+		_tabs_container = nil,
+		_main_content = nil,
+		_sections = nil,
+		_topbar = nil,
+		_ui_scale_object = nil,
+		_keybind_scale = nil,
+		_keybind_list_content = nil,
+		_keybind_list_frame = nil,
+		_notification_holder = nil,
+		_notification_scale = nil,
+		_notification_order = 0,
+		_apply_scale = nil,
+		_lua_manager = nil,
+	}, library) :: _runtime
 
-PlayerGroup:create_keybind("teleport_key", {
-    title = "Teleport Key",
-    default = Enum.KeyCode.E,
-    callback = function(key)
-        print("Pressed Teleport Key:", key)
-    end
-})
+	library._current = self
 
-PlayerGroup:create_button({
-    title = "Test Notification",
-    callback = function()
-        library:notify({
-            title = "Success",
-            text = "Button Clicked Successfully!",
-            duration = 3
-        })
-    end
-})
+	self:_init()
+	self:_init_keybind_list()
 
--- แจ้งเตือนเมื่อโหลดสำเร็จ
-library:notify({
-    title = "Virex UI",
-    text = "Loaded successfully!",
-    duration = 4
-})
+	if self._apply_scale then
+		self._apply_scale()
+	end
+
+	return self
+        end
+function library._init(self: _runtime)
+	set_thread_identity(6)
+
+	local _main = create_new('ScreenGui', {
+		Name = '_nextshop',
+		ResetOnSpawn = false,
+		IgnoreGuiInset = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Parent = interface_parent,
+	})
+
+	if syn and syn.protect_gui then
+		syn.protect_gui(_main)
+	end
+
+	self._ui = _main
+
+	local container = create_new('Frame', {
+		BackgroundColor3 = NEXTSHOP_BG,
+		AnchorPoint = _new_vector2(0.5, 0.5),
+		Position = _new_udim2(0.5, 0, 0.5, 0),
+		Size = _new_udim2(0, 600, 0, 400),
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+		Active = true,
+		Parent = _main,
+	})
+
+	create_round(container, 12)
+	local container_outline = create_outline(container)
+	container_outline.Color = NEXTSHOP_ACCENT_DARK
+	container_outline.Transparency = 0.25
+
+	local ui_scale = create_new('UIScale', {
+		Parent = container,
+	})
+
+	self._ui_scale_object = ui_scale
+        end
+ 	local notification_holder = create_new('Frame', {
+		Name = '_notifications',
+		BackgroundTransparency = 1,
+		AnchorPoint = _new_vector2(0.5, 1),
+		Position = _new_udim2(0.5, 0, 0.5, 178),
+		Size = _new_udim2(0, 560, 0, 180),
+		BorderSizePixel = 0,
+		ZIndex = 199,
+		Parent = _main,
+	})
+
+	create_new('UIListLayout', {
+		FillDirection = Enum.FillDirection.Vertical,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		VerticalAlignment = Enum.VerticalAlignment.Bottom,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = _new_udim(0, 6),
+		Parent = notification_holder,
+	})
+
+	local notification_scale = create_new('UIScale', {
+		Scale = self._ui_scale,
+		Parent = notification_holder,
+	})
+
+	self._notification_holder = notification_holder
+	self._notification_scale = notification_scale
+end
+
+function library.notify(self: runtime_typeof, message)
+	self = resolve_runtime(self)
+
+	if not self or not self._notification_holder then
+		return
+	end
+
+	local text = _tostring(message or ''):gsub('[\r\n]+', ' '):gsub('^%s+', ''):gsub('%s+$', '')
+
+	if text == '' then
+		return
+	end
+
+	print(text)
+        end
+function resolve_runtime(self: runtime_typeof)
+	if self ~= library and _type(self) == 'table' and self._tabs then
+		return self :: _runtime
+	end
+
+	return library._current
+end
+
+return library
+end)
+            
