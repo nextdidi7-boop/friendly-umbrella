@@ -1,0 +1,156 @@
+--========================================================
+-- [EGG STEALER HUB] - UI LOADER & CONFIGURATION
+--========================================================
+
+local WindUI
+do
+    local ok, result = pcall(function()
+        return loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+    end)
+    WindUI = ok and result or loadstring(game:HttpGet("https://raw.githubusercontent.com/Footagesus/WindUI/main/dist/main.lua"))()
+end
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ProximityPromptService = game:GetService("ProximityPromptService")
+local LocalPlayer = Players.LocalPlayer
+
+-- Global Settings
+_G.Settings = {
+    UndergroundSpeedEnabled = false,
+    SpeedVal = 100, -- ค่าเริ่มต้นความเร็ว
+    OriginalHipHeight = 2,
+    
+    FastPickupEnabled = false,
+    OriginalHoldDurations = {}
+}
+
+--========================================================
+-- LOGIC FUNCTIONS
+--========================================================
+
+-- ฟังก์ชันจัดการระบบวิ่งเร็ว + จมดิน
+local function UpdateSpeedAndUnderground()
+    local char = LocalPlayer.Character
+    if not char then return end
+    
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    local hrp = char:FindFirstChild("HumanoidRootPart")
+    
+    if hum and hrp then
+        if _G.Settings.UndergroundSpeedEnabled then
+            -- ปรับความเร็ว
+            hum.WalkSpeed = _G.Settings.SpeedVal
+            
+            -- ปรับระดับความสูง ให้ตัวจมดินครึ่งตัว (ลด HipHeight ลง)
+            hum.HipHeight = -1.5
+        else
+            -- คืนค่าปกติ
+            hum.HipHeight = _G.Settings.OriginalHipHeight or 2
+            hum.WalkSpeed = 16
+        end
+    end
+end
+
+-- ลูปตรวจสอบการวิ่งและการจมดินตลอดเวลา
+RunService.Stepped:Connect(function()
+    if _G.Settings.UndergroundSpeedEnabled and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then
+            hum.WalkSpeed = _G.Settings.SpeedVal
+            hum.HipHeight = -1.5
+        end
+    end
+end)
+
+-- เก็บค่า HipHeight เดิมเมื่อตัวละครเกิดใหม่
+LocalPlayer.CharacterAdded:Connect(function(char)
+    local hum = char:WaitForChild("Humanoid", 5)
+    if hum then
+        _G.Settings.OriginalHipHeight = hum.HipHeight
+    end
+end)
+
+if LocalPlayer.Character then
+    local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if hum then
+        _G.Settings.OriginalHipHeight = hum.HipHeight
+    end
+end
+
+-- ฟังก์ชันจัดการระบบหยิบไข่เร็ว (ProximityPrompt)
+ProximityPromptService.PromptShown:Connect(function(prompt)
+    if _G.Settings.FastPickupEnabled then
+        if not _G.Settings.OriginalHoldDurations[prompt] then
+            _G.Settings.OriginalHoldDurations[prompt] = prompt.HoldDuration
+        end
+        prompt.HoldDuration = 0
+    end
+end)
+
+local function ToggleFastPickup(state)
+    _G.Settings.FastPickupEnabled = state
+    
+    -- ปรับค่าทุก Prompt ที่มีอยู่ในแมพทันที
+    for _, prompt in ipairs(workspace:GetDescendants()) do
+        if prompt:IsA("ProximityPrompt") then
+            if state then
+                if not _G.Settings.OriginalHoldDurations[prompt] then
+                    _G.Settings.OriginalHoldDurations[prompt] = prompt.HoldDuration
+                end
+                prompt.HoldDuration = 0
+            else
+                if _G.Settings.OriginalHoldDurations[prompt] then
+                    prompt.HoldDuration = _G.Settings.OriginalHoldDurations[prompt]
+                end
+            end
+        end
+    end
+end
+
+--========================================================
+-- WINDUI INTERFACE (แมพขโมยไข่)
+--========================================================
+
+local Window = WindUI:CreateWindow({
+    Title = "แมพขโมยไข่ HUB",
+    Icon = "egg",
+    Author = "Auto Steal System",
+    Folder = "EggStealerHub"
+})
+
+-- TAB: Main Functions
+local MainTab = Window:Tab({ Title = "ฟังก์ชันหลัก", Icon = "zap" })
+
+MainTab:Toggle({
+    Title = "เปิดใช้งาน วิ่งเร็ว + ตัวจมดิน (กันวาปกลับ)",
+    Value = _G.Settings.UndergroundSpeedEnabled,
+    Callback = function(v)
+        _G.Settings.UndergroundSpeedEnabled = v
+        UpdateSpeedAndUnderground()
+    end
+})
+
+MainTab:Slider({
+    Title = "ความเร็วการเดิน (WalkSpeed)",
+    Step = 10,
+    Value = { Min = 16, Max = 1500, Default = _G.Settings.SpeedVal },
+    Callback = function(v)
+        _G.Settings.SpeedVal = v
+        if _G.Settings.UndergroundSpeedEnabled then
+            UpdateSpeedAndUnderground()
+        end
+    end
+})
+
+MainTab:Section({ Title = "ระบบหยิบของ" })
+
+MainTab:Toggle({
+    Title = "เปิดใช้งาน หยิบไข่เร็ว (กดปุ๊บได้ปั๊บ 0 วินาที)",
+    Value = _G.Settings.FastPickupEnabled,
+    Callback = function(v)
+        ToggleFastPickup(v)
+    end
+})
+
+print("EGG STEALER HUB LOADED SUCCESSFULLY!")
