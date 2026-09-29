@@ -1,153 +1,648 @@
---========================================================
--- [BASEBALL ULTRA] - MINI DRAGGABLE UI (DIRECT SCRIPT)
---========================================================
-
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
-local Workspace = game:GetService("Workspace")
-
-local LocalPlayer = Players.LocalPlayer
-local AutoHitEnabled = false
-local DetectionDistance = 30 -- ระยะตรวจจับลูกบอล
-
--- ลบ UI เก่าออกหากมีอยู่แล้ว
-if LocalPlayer.PlayerGui:FindFirstChild("BaseballMiniUI") then
-    LocalPlayer.PlayerGui.BaseballMiniUI:Destroy()
+task.spawn(function()  
+  
+local Library = loadstring([==[
+if not LPH_OBFUSCATED then
+	LPH_ENCFUNC = function(callback)
+		return callback
+	end
+	LPH_NO_VIRTUALIZE = function(...)
+		return ...
+	end
+	LPH_NO_UPVALUES = function(...)
+		return ...
+	end
+	LPH_JIT_MAX = function(...)
+		return ...
+	end
+	LPH_JIT = function(...)
+		return ...
+	end
 end
 
---========================================================
--- 1. CREATE GUI
---========================================================
+local _cloneref = cloneref
 
-local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "BaseballMiniUI"
-ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+local user_input_service = _cloneref(game:GetService('UserInputService'))
+local tween_service = _cloneref(game:GetService('TweenService'))
+local text_service = _cloneref(game:GetService('TextService'))
+local http_service = _cloneref(game:GetService('HttpService'))
+local core_gui = _cloneref(game:GetService('CoreGui'))
+local debris = _cloneref(game:GetService('Debris'))
 
--- กรอบสี่เหลี่ยมเล็กๆ
-local MainFrame = Instance.new("Frame")
-MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 110, 0, 55)
-MainFrame.Position = UDim2.new(0.5, -55, 0.2, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
-MainFrame.BorderSizePixel = 0
-MainFrame.Active = true
-MainFrame.Parent = ScreenGui
+-- VIREX visual theme (presentation only)
+local VIREX_BG = Color3.fromRGB(12, 13, 17)
+local VIREX_PANEL = Color3.fromRGB(18, 19, 24)
+local VIREX_PANEL_2 = Color3.fromRGB(22, 23, 29)
+local VIREX_HOVER = Color3.fromRGB(30, 31, 39)
+local VIREX_ACCENT = Color3.fromRGB(255, 72, 92)
+local VIREX_ACCENT_DARK = Color3.fromRGB(145, 34, 50)
+local VIREX_PURPLE = Color3.fromRGB(165, 92, 255)
+local VIREX_BLUE = Color3.fromRGB(72, 145, 255)
+local VIREX_CYAN = Color3.fromRGB(64, 220, 255)
+local VIREX_GREEN = Color3.fromRGB(72, 220, 145)
+local VIREX_GOLD = Color3.fromRGB(255, 190, 72)
+local VIREX_TEXT = Color3.fromRGB(245, 245, 248)
+local VIREX_MUTED = Color3.fromRGB(155, 158, 168)
 
-local UICorner = Instance.new("UICorner")
-UICorner.CornerRadius = UDim.new(0, 8)
-UICorner.Parent = MainFrame
+local _new_instance = Instance.new
+local _new_tween_info = TweenInfo.new
+local _new_udim = UDim.new
+local _new_udim2 = UDim2.new
+local _udim2_from_offset = UDim2.fromOffset
+local _new_vector2 = Vector2.new
 
-local UIStroke = Instance.new("UIStroke")
-UIStroke.Thickness = 2
-UIStroke.Color = Color3.fromRGB(80, 80, 90)
-UIStroke.Parent = MainFrame
+local _clamp = math.clamp
+local _floor = math.floor
+local _max = math.max
+local _min = math.min
 
--- ปุ่มกดหลัก
-local ToggleButton = Instance.new("TextButton")
-ToggleButton.Name = "ToggleButton"
-ToggleButton.Size = UDim2.new(1, -10, 1, -10)
-ToggleButton.Position = UDim2.new(0, 5, 0, 5)
-ToggleButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50) -- สีแดง (OFF)
-ToggleButton.Text = "AUTO HIT\n[ OFF ]"
-ToggleButton.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleButton.TextSize = 12
-ToggleButton.Font = Enum.Font.GothamBold
-ToggleButton.Parent = MainFrame
+local _clear = table.clear
+local _find = table.find
+local _freeze = table.freeze
+local _insert = table.insert
+local _pack = table.pack
+local _unpack = table.unpack
 
-local BtnCorner = Instance.new("UICorner")
-BtnCorner.CornerRadius = UDim.new(0, 6)
-BtnCorner.Parent = ToggleButton
+local _defer = task.defer
+local _delay = task.delay
+local _create_tween = tween_service.Create
 
---========================================================
--- 2. DRAGGABLE LOGIC (ระบบลากเลื่อน)
---========================================================
+local _pairs = pairs
+local _pcall = pcall
+local _tostring = tostring
+local _type = type
 
-local dragging = false
-local dragInput, dragStart, startPos
+local library = {
+	_config = {},
+	_flags = {},
+	_current = nil,
+}
+library.__index = library
 
-MainFrame.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = MainFrame.Position
+local interface_parent = (gethui and gethui()) or core_gui
+local old_interface = interface_parent:FindFirstChild('_virex')
 
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
-        end)
-    end
+if old_interface then
+	debris:AddItem(old_interface, 0)
+end
+local create_new = LPH_NO_VIRTUALIZE(function(class_name, properties)
+	local instance = _new_instance(class_name)
+
+	for property, value in properties do
+		if property ~= 'Parent' then
+			instance[property] = value
+		end
+	end
+
+	instance.Parent = properties.Parent
+
+	return instance
 end)
 
-MainFrame.InputChanged:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
-        dragInput = input
-    end
+local create_round = LPH_NO_VIRTUALIZE(function(instance, radius)
+	return create_new('UICorner', {
+		CornerRadius = _new_udim(0, radius),
+		Parent = instance,
+	})
 end)
 
-UserInputService.InputChanged:Connect(function(input)
-    if input == dragInput and dragging then
-        local delta = input.Position - dragStart
-        MainFrame.Position = UDim2.new(
-            startPos.X.Scale, 
-            startPos.X.Offset + delta.X, 
-            startPos.Y.Scale, 
-            startPos.Y.Offset + delta.Y
-        )
-    end
+local create_pill = LPH_NO_VIRTUALIZE(function(instance)
+	return create_new('UICorner', {
+		CornerRadius = _new_udim(1, 0),
+		Parent = instance,
+	})
 end)
 
---========================================================
--- 3. TOGGLE & SMOOTH AUTO HIT ENGINE
---========================================================
+local create_outline = LPH_NO_VIRTUALIZE(function(instance, refresh)
+	local stroke = create_new('UIStroke', {
+		Color = Color3.fromRGB(48, 50, 60),
+		Thickness = 1,
+		ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+		Parent = instance,
+	})
 
--- ปุ่มกดสลับสี
-ToggleButton.MouseButton1Click:Connect(function()
-    AutoHitEnabled = not AutoHitEnabled
-    
-    if AutoHitEnabled then
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(40, 200, 80) -- สีเขียว (ON)
-        ToggleButton.Text = "AUTO HIT\n[ ON ]"
-    else
-        ToggleButton.BackgroundColor3 = Color3.fromRGB(220, 50, 50) -- สีแดง (OFF)
-        ToggleButton.Text = "AUTO HIT\n[ OFF ]"
-    end
+	if refresh then
+		instance:GetPropertyChangedSignal('AbsoluteSize'):Connect(function()
+			stroke.Enabled = false
+			stroke.Enabled = true
+		end)
+	end
+
+	return stroke
 end)
 
--- ฟังก์ชันตีลูก
-local function PerformSwing()
-    pcall(function()
-        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, true, game, 0)
-        task.wait(0.01)
-        VirtualInputManager:SendMouseButtonEvent(0, 0, 0, false, game, 0)
-    end)
+local create_vertical_list = LPH_NO_VIRTUALIZE(function(instance, gap)
+	return create_new('UIListLayout', {
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = _new_udim(0, gap or 0),
+		Parent = instance,
+	})
+end)
+
+local create_padding = LPH_NO_VIRTUALIZE(function(instance, top, bottom, left, right)
+	return create_new('UIPadding', {
+		PaddingTop = _new_udim(0, top),
+		PaddingBottom = _new_udim(0, bottom),
+		PaddingLeft = _new_udim(0, left),
+		PaddingRight = _new_udim(0, right),
+		Parent = instance,
+	})
+end)
+
+local create_label = LPH_NO_VIRTUALIZE(function(properties)
+	properties.BackgroundTransparency = 1
+	properties.FontFace =
+		Font.new('rbxasset://fonts/families/GothamSSm.json', Enum.FontWeight.SemiBold, Enum.FontStyle.Normal)
+	properties.TextColor3 = properties.TextColor3 or Color3.fromRGB(180, 180, 180)
+	properties.BorderSizePixel = 0
+
+	return create_new('TextLabel', properties)
+end)
+
+local create_divider = LPH_NO_VIRTUALIZE(function(parent, position, size)
+	return create_new('Frame', {
+		BackgroundColor3 = Color3.fromRGB(35, 35, 35),
+		Position = position,
+		Size = size,
+		BorderSizePixel = 0,
+		Parent = parent,
+	})
+end)
+
+local round_number = LPH_NO_VIRTUALIZE(function(number, decimals)
+	local multiplier = 10 ^ (decimals or 0)
+
+	return _floor(number * multiplier + 0.5 - (number < 0 and 1 or 0)) / multiplier
+end)
+
+function library.close_all_dropdowns(self)
+	for _, dropdown in self._active_dropdowns do
+		if dropdown._state then
+			dropdown:unfold()
+		end
+	end
+end
+library._new = function(runtime_type)
+	local is_mobile = user_input_service.TouchEnabled
+		or not (user_input_service.KeyboardEnabled and user_input_service.MouseEnabled)
+	local self = setmetatable({
+		_tab = 0,
+		_tabs = {},
+		_active_tab = nil,
+		_layout_order = 0,
+		_category_order = 0,
+		_type = runtime_type,
+		_config = library._config,
+		_flags = library._flags,
+		_active_dropdowns = {},
+		_keybind_entries = {},
+		_keybind_list_visible = false,
+		_is_mobile = is_mobile,
+		_ui_scale = 1,
+		_label_text_size = is_mobile and 15 or 14,
+		_small_text_size = is_mobile and 11 or 10,
+		_ui_open = true,
+		_dragging = false,
+		_drag_start = nil,
+		_container_position = nil,
+		_ui = nil,
+		_container = nil,
+		_sidebar = nil,
+		_pin = nil,
+		_tabs_container = nil,
+		_main_content = nil,
+		_sections = nil,
+		_topbar = nil,
+		_ui_scale_object = nil,
+		_apply_scale = nil,
+	}, library)
+
+	library._current = self
+
+	self:_init()
+
+	if self._apply_scale then
+		self._apply_scale()
+	end
+
+	return self
 end
 
--- ลูปตรวจจับลูกบอล
-RunService.RenderStepped:Connect(function()
-    if AutoHitEnabled then
-        local char = LocalPlayer.Character
-        if char and char:FindFirstChild("HumanoidRootPart") then
-            local hrp = char.HumanoidRootPart
-            
-            for _, obj in ipairs(Workspace:GetDescendants()) do
-                if obj:IsA("BasePart") then
-                    local name = obj.Name:lower()
-                    if name:find("ball") or name:find("baseball") or name:find("projectile") then
-                        local distance = (hrp.Position - obj.Position).Magnitude
-                        
-                        if distance <= DetectionDistance then
-                            PerformSwing()
-                            break
-                        end
-                    end
-                end
-            end
-        end
-    end
-end)
+function library._init(self)
+	local _main = create_new('ScreenGui', {
+		Name = '_virex',
+		ResetOnSpawn = false,
+		IgnoreGuiInset = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Parent = interface_parent,
+	})
 
-print("✅ BASEBALL AUTO HIT READY!")
+	if syn and syn.protect_gui then
+		syn.protect_gui(_main)
+	end
+
+	self._ui = _main
+
+	local container = create_new('Frame', {
+		BackgroundColor3 = VIREX_BG,
+		AnchorPoint = _new_vector2(0.5, 0.5),
+		Position = _new_udim2(0.5, 0, 0.5, 0),
+		Size = _udim2_from_offset(600, 400),
+		BorderSizePixel = 0,
+		ClipsDescendants = true,
+		Active = true,
+		Parent = _main,
+	})
+
+	create_round(container, 12)
+	local container_outline = create_outline(container)
+	container_outline.Color = VIREX_ACCENT_DARK
+	container_outline.Transparency = 0.25
+
+	local ui_scale = create_new('UIScale', {
+		Parent = container,
+	})
+
+	self._ui_scale_object = ui_scale
+
+	local apply_scale = LPH_NO_VIRTUALIZE(function()
+		if self._is_mobile then
+			local viewport_size = workspace.CurrentCamera.ViewportSize
+
+			if self._ui and self._ui.AbsoluteSize.Y > 0 then
+				viewport_size = self._ui.AbsoluteSize
+			end
+
+			local screen_scale = (viewport_size.X / 1400) * 1.4375
+			self._ui_scale = _clamp(
+				_min(screen_scale, (viewport_size.X * 0.95) / 600, (viewport_size.Y * 0.95) / 400),
+				0.503125,
+				1.4375
+			)
+		else
+			self._ui_scale = 1
+		end
+
+		ui_scale.Scale = self._ui_scale
+	end)
+
+	self._apply_scale = apply_scale
+	apply_scale()
+
+	workspace.CurrentCamera:GetPropertyChangedSignal('ViewportSize'):Connect(function()
+		_defer(apply_scale)
+	end)
+
+	local _toggle_gui = create_new('ScreenGui', {
+		Name = '_virex_toggle',
+		ResetOnSpawn = false,
+		IgnoreGuiInset = true,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		Parent = _main,
+	})
+
+	local mobile_toggle = create_new('TextButton', {
+		BackgroundColor3 = VIREX_PANEL_2,
+		AnchorPoint = _new_vector2(0, 0),
+		Position = _new_udim2(0, 18, 0, 54),
+		Size = _new_udim2(0, 44, 0, 44),
+		Text = '',
+		AutoButtonColor = false,
+		BorderSizePixel = 0,
+		Visible = true,
+		Active = true,
+		ZIndex = 100,
+		Parent = _toggle_gui,
+	})
+
+	create_round(mobile_toggle, 999)
+	local toggle_outline = create_outline(mobile_toggle)
+	toggle_outline.Color = VIREX_ACCENT_DARK
+	toggle_outline.Thickness = 1.5
+
+	local vx_logo = create_new('TextLabel', {
+		BackgroundTransparency = 1,
+		AnchorPoint = _new_vector2(0.5, 0.5),
+		Position = _new_udim2(0.5, 0, 0.5, 0),
+		Size = _new_udim2(1, -8, 1, -8),
+		Text = 'VX',
+		TextColor3 = VIREX_TEXT,
+		TextSize = 15,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextYAlignment = Enum.TextYAlignment.Center,
+		ZIndex = 101,
+		Parent = mobile_toggle,
+	})
+
+	local sidebar = create_new('Frame', {
+		BackgroundColor3 = Color3.fromRGB(15, 16, 21),
+		BackgroundTransparency = 0,
+		Size = _new_udim2(0, 160, 1, 0),
+		Parent = container,
+	})
+
+	create_divider(sidebar, _new_udim2(1, -1, 0, 48), _new_udim2(0, 1, 1, -48))
+
+	local logo_area = create_new('Frame', {
+		BackgroundTransparency = 1,
+		Size = _new_udim2(1, 0, 0, 48),
+		Parent = sidebar,
+	})
+
+	create_label({
+		Position = _new_udim2(0, 20, 0, 0),
+		Size = _new_udim2(1, -30, 1, 0),
+		Text = 'VIREX',
+		TextColor3 = VIREX_TEXT,
+		TextSize = self._is_mobile and 18 or 17,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = logo_area,
+	})
+
+	create_divider(logo_area, _new_udim2(0, 0, 1, -1), _new_udim2(1, 0, 0, 1))
+
+	local pin = create_new('Frame', {
+		BackgroundColor3 = VIREX_ACCENT,
+		BackgroundTransparency = 1,
+		Position = _new_udim2(0, 10, 0, 0),
+		Size = _new_udim2(0, 4, 0, 16),
+		BorderSizePixel = 0,
+		ZIndex = 50,
+		Parent = sidebar,
+	})
+
+	create_pill(pin)
+
+	local tabs_container = create_new('ScrollingFrame', {
+		BackgroundTransparency = 1,
+		Position = _new_udim2(0, 0, 0, 48),
+		Size = _new_udim2(1, 0, 1, -48),
+		CanvasSize = _new_udim2(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		BorderSizePixel = 0,
+		Parent = sidebar,
+	})
+
+	tabs_container.ScrollBarThickness = 0
+	create_padding(tabs_container, 6, 16, 10, 10)
+	create_vertical_list(tabs_container, 6)
+
+	local main_content = create_new('Frame', {
+		BackgroundTransparency = 1,
+		Position = _new_udim2(0, 160, 0, 0),
+		Size = _new_udim2(0, (600 - 160), 1, 0),
+		Parent = container,
+	})
+
+	local topbar = create_new('Frame', {
+		BackgroundTransparency = 1,
+		Size = _new_udim2(1, 0, 0, 48),
+		ZIndex = 5,
+		Parent = main_content,
+	})
+
+	local sections_viewport = create_new('Frame', {
+		BackgroundTransparency = 1,
+		Position = _new_udim2(0, 0, 0, 48),
+		Size = _new_udim2(1, 0, 1, -48),
+		ClipsDescendants = true,
+		Parent = main_content,
+	})
+
+	local sections = create_new('Folder', {
+		Parent = sections_viewport,
+	})
+
+	function self:change_visibility(state)
+		container.Visible = state
+	end
+
+	mobile_toggle.MouseButton1Click:Connect(function()
+		self._ui_open = not self._ui_open
+		self:change_visibility(self._ui_open)
+	end)
+
+	self._container = container
+	self._sidebar = sidebar
+	self._pin = pin
+	self._tabs_container = tabs_container
+	self._main_content = main_content
+	self._sections = sections
+	self._topbar = topbar
+end
+
+function library.create_tab(self, title)
+	local tab_button = create_new('TextButton', {
+		Name = title,
+		BackgroundColor3 = VIREX_HOVER,
+		BackgroundTransparency = 1,
+		Size = _new_udim2(1, 0, 0, 32),
+		Text = '',
+		AutoButtonColor = false,
+		BorderSizePixel = 0,
+		Parent = self._tabs_container,
+	})
+
+	create_round(tab_button, 7)
+
+	create_label({
+		Position = _new_udim2(0, 10, 0, 0),
+		Size = _new_udim2(1, -20, 1, 0),
+		Text = title,
+		TextSize = self._label_text_size,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Parent = tab_button,
+	})
+
+	local section = create_new('ScrollingFrame', {
+		BackgroundTransparency = 1,
+		Size = _new_udim2(1, -32, 1, -32),
+		Position = _new_udim2(0, 16, 0, 16),
+		CanvasSize = _new_udim2(0, 0, 0, 0),
+		AutomaticCanvasSize = Enum.AutomaticSize.Y,
+		BorderSizePixel = 0,
+		Visible = false,
+		Parent = self._sections,
+	})
+
+	section.ScrollBarThickness = 0
+	create_vertical_list(section, 12)
+
+	local tab_data = {
+		_btn = tab_button,
+		_section = section,
+	}
+
+	_insert(self._tabs, tab_data)
+
+	if #self._tabs == 1 then
+		section.Visible = true
+		tab_button.BackgroundTransparency = 0
+	end
+
+	tab_button.MouseButton1Click:Connect(function()
+		for _, t in self._tabs do
+			t._section.Visible = false
+			t._btn.BackgroundTransparency = 1
+		end
+		section.Visible = true
+		tab_button.BackgroundTransparency = 0
+	end)
+
+	local group_manager = {}
+
+	function group_manager:create_toggle(flag, values)
+		local state = values.default or false
+
+		local toggle_frame = create_new('Frame', {
+			BackgroundTransparency = 1,
+			Size = _new_udim2(1, 0, 0, 24),
+			Parent = section,
+		})
+
+		local label = create_label({
+			Size = _new_udim2(1, -40, 1, 0),
+			Text = values.title,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = toggle_frame,
+		})
+
+		local switch = create_new('TextButton', {
+			BackgroundColor3 = state and VIREX_ACCENT or Color3.fromRGB(40, 40, 40),
+			AnchorPoint = _new_vector2(1, 0.5),
+			Position = _new_udim2(1, 0, 0.5, 0),
+			Size = _new_udim2(0, 30, 0, 18),
+			Text = '',
+			Parent = toggle_frame,
+		})
+		create_pill(switch)
+
+		switch.MouseButton1Click:Connect(function()
+			state = not state
+			switch.BackgroundColor3 = state and VIREX_ACCENT or Color3.fromRGB(40, 40, 40)
+			if values.callback then
+				values.callback(state)
+			end
+		end)
+	end
+
+	function group_manager:create_slider(flag, values)
+		local value = values.default or values.minimum
+
+		local slider_frame = create_new('Frame', {
+			BackgroundTransparency = 1,
+			Size = _new_udim2(1, 0, 0, 30),
+			Parent = section,
+		})
+
+		local label = create_label({
+			Size = _new_udim2(1, -48, 0, 16),
+			Text = values.title,
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Left,
+			Parent = slider_frame,
+		})
+
+		local val_label = create_label({
+			Position = _new_udim2(1, -48, 0, 0),
+			Size = _new_udim2(0, 48, 0, 16),
+			Text = _tostring(value),
+			TextSize = 14,
+			TextXAlignment = Enum.TextXAlignment.Right,
+			Parent = slider_frame,
+		})
+
+		local track = create_new('TextButton', {
+			BackgroundColor3 = Color3.fromRGB(40, 40, 40),
+			Position = _new_udim2(0, 0, 0, 18),
+			Size = _new_udim2(1, 0, 0, 6),
+			Text = '',
+			Parent = slider_frame,
+		})
+		create_pill(track)
+
+		local fill = create_new('Frame', {
+			BackgroundColor3 = VIREX_ACCENT,
+			Size = _new_udim2((value - values.minimum) / (values.maximum - values.minimum), 0, 1, 0),
+			BorderSizePixel = 0,
+			Parent = track,
+		})
+		create_pill(fill)
+
+		local dragging = false
+
+		local function update(input)
+			local pos = _clamp((input.Position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+			value = round_number(values.minimum + (values.maximum - values.minimum) * pos, 0)
+			val_label.Text = _tostring(value)
+			fill.Size = _new_udim2(pos, 0, 1, 0)
+			if values.callback then
+				values.callback(value)
+			end
+		end
+
+		track.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				dragging = true
+				update(input)
+			end
+		end)
+
+		user_input_service.InputEnded:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+				dragging = false
+			end
+		end)
+
+		user_input_service.InputChanged:Connect(function(input)
+			if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+				update(input)
+			end
+		end)
+	end
+
+	return group_manager
+end
+-- Initialization & UI Setup
+local main_window = library._new()
+local main_tab = main_window:create_tab('Main')
+
+-- 1. Auto Parry
+main_tab:create_toggle('auto_parry', {
+	title = 'Auto Parry',
+	default = false,
+	callback = function(state)
+		-- Auto Parry Logic
+	end,
+})
+
+-- 2. Randomize Accuracy
+main_tab:create_slider('randomize_accuracy', {
+	title = 'Randomize Accuracy',
+	minimum = 0,
+	maximum = 100,
+	default = 100,
+	callback = function(val)
+		-- Randomize Accuracy Logic
+	end,
+})
+
+-- 3. Auto Ability
+main_tab:create_toggle('auto_ability', {
+	title = 'Auto Ability',
+	default = false,
+	callback = function(state)
+		-- Auto Ability Logic
+	end,
+})
+
+-- 4. VIREX Immortal
+main_tab:create_toggle('virex_immortal', {
+	title = 'VIREX Immortal',
+	default = false,
+	callback = function(state)
+		-- VIREX Immortal Logic
+	end,
+})
+
+end)
