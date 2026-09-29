@@ -1670,3 +1670,339 @@ function library._init_keybind_list(self: _runtime)
 end
 
 functi
+-- =================================================================
+-- VIREX UI Library (Continuation & Complete Script)
+-- =================================================================
+
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local Mouse = LocalPlayer:GetMouse()
+
+local VIREX = {
+    Flags = {},
+    Theme = {
+        Background = Color3.fromRGB(20, 20, 25),
+        Sidebar = Color3.fromRGB(25, 25, 30),
+        Card = Color3.fromRGB(30, 30, 38),
+        Accent = Color3.fromRGB(115, 80, 255),
+        Text = Color3.fromRGB(255, 255, 255),
+        SubText = Color3.fromRGB(160, 160, 175),
+        Border = Color3.fromRGB(45, 45, 55)
+    }
+}
+
+-- [ ScreenGui Setup ]
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "VIREX_UI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+if syn and syn.protect_gui then
+    syn.protect_gui(ScreenGui)
+    ScreenGui.Parent = game:GetService("CoreGui")
+elseif gethui then
+    ScreenGui.Parent = gethui()
+else
+    ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+end
+
+-- [ Notification System ]
+local NotifContainer = Instance.new("Frame")
+NotifContainer.Name = "NotificationContainer"
+NotifContainer.Size = UDim2.new(0, 300, 1, -20)
+NotifContainer.Position = UDim2.new(1, -310, 0, 10)
+NotifContainer.BackgroundTransparency = 1
+NotifContainer.Parent = ScreenGui
+
+local NotifLayout = Instance.new("UIListLayout")
+NotifLayout.SortOrder = Enum.SortOrder.LayoutOrder
+NotifLayout.Padding = UDim.new(0, 8)
+NotifLayout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+NotifLayout.Parent = NotifContainer
+
+function VIREX:Notify(options)
+    options = options or {}
+    local title = options.Title or "Notification"
+    local content = options.Content or ""
+    local duration = options.Duration or 3
+
+    local NotifFrame = Instance.new("Frame")
+    NotifFrame.Size = UDim2.new(1, 0, 0, 60)
+    NotifFrame.BackgroundColor3 = VIREX.Theme.Card
+    NotifFrame.BorderSizePixel = 0
+    NotifFrame.BackgroundTransparency = 1
+    NotifFrame.Parent = NotifContainer
+
+    local UICorner = Instance.new("UICorner", NotifFrame)
+    UICorner.CornerRadius = UDim.new(0, 8)
+
+    local UIStroke = Instance.new("UIStroke", NotifFrame)
+    UIStroke.Color = VIREX.Theme.Accent
+    UIStroke.Thickness = 1
+
+    local TitleLabel = Instance.new("TextLabel")
+    TitleLabel.Size = UDim2.new(1, -16, 0, 20)
+    TitleLabel.Position = UDim2.new(0, 10, 0, 8)
+    TitleLabel.Text = title
+    TitleLabel.TextColor3 = VIREX.Theme.Text
+    TitleLabel.TextSize = 14
+    TitleLabel.Font = Enum.Font.GothamBold
+    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    TitleLabel.BackgroundTransparency = 1
+    TitleLabel.Parent = NotifFrame
+
+    local ContentLabel = Instance.new("TextLabel")
+    ContentLabel.Size = UDim2.new(1, -16, 0, 24)
+    ContentLabel.Position = UDim2.new(0, 10, 0, 28)
+    ContentLabel.Text = content
+    ContentLabel.TextColor3 = VIREX.Theme.SubText
+    ContentLabel.TextSize = 12
+    ContentLabel.Font = Enum.Font.Gotham
+    ContentLabel.TextXAlignment = Enum.TextXAlignment.Left
+    ContentLabel.BackgroundTransparency = 1
+    ContentLabel.Parent = NotifFrame
+
+    TweenService:Create(NotifFrame, TweenInfo.new(0.3), {BackgroundTransparency = 0}):Play()
+
+    task.delay(duration, function()
+        local tw = TweenService:Create(NotifFrame, TweenInfo.new(0.3), {BackgroundTransparency = 1})
+        tw:Play()
+        tw.Completed:Connect(function()
+            NotifFrame:Destroy()
+        end)
+    end)
+end
+
+-- [ Window Creation ]
+function VIREX:CreateWindow(options)
+    options = options or {}
+    local windowTitle = options.Title or "VIREX HUB"
+    
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Name = "MainFrame"
+    MainFrame.Size = UDim2.new(0, 600, 0, 380)
+    MainFrame.Position = UDim2.new(0.5, -300, 0.5, -190)
+    MainFrame.BackgroundColor3 = VIREX.Theme.Background
+    MainFrame.BorderSizePixel = 0
+    MainFrame.Active = true
+    MainFrame.Draggable = true
+    MainFrame.Parent = ScreenGui
+
+    local MainCorner = Instance.new("UICorner", MainFrame)
+    MainCorner.CornerRadius = UDim.new(0, 10)
+
+    -- TopBar
+    local TopBar = Instance.new("Frame")
+    TopBar.Name = "TopBar"
+    TopBar.Size = UDim2.new(1, 0, 0, 40)
+    TopBar.BackgroundColor3 = VIREX.Theme.Sidebar
+    TopBar.BorderSizePixel = 0
+    TopBar.Parent = MainFrame
+
+    local TopCorner = Instance.new("UICorner", TopBar)
+    TopCorner.CornerRadius = UDim.new(0, 10)
+
+    local TitleLabel = Instance.new("TextLabel")
+    TitleLabel.Size = UDim2.new(1, -20, 1, 0)
+    TitleLabel.Position = UDim2.new(0, 15, 0, 0)
+    TitleLabel.Text = windowTitle
+    TitleLabel.TextColor3 = VIREX.Theme.Text
+    TitleLabel.Font = Enum.Font.GothamBold
+    TitleLabel.TextSize = 16
+    TitleLabel.TextXAlignment = Enum.TextXAlignment.Left
+    TitleLabel.BackgroundTransparency = 1
+    TitleLabel.Parent = TopBar
+
+    -- Mobile Toggle Button Button
+    local MobileBtn = Instance.new("TextButton")
+    MobileBtn.Name = "MobileToggle"
+    MobileBtn.Size = UDim2.new(0, 45, 0, 45)
+    MobileBtn.Position = UDim2.new(0, 15, 0.1, 0)
+    MobileBtn.BackgroundColor3 = VIREX.Theme.Accent
+    MobileBtn.Text = "VX"
+    MobileBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    MobileBtn.Font = Enum.Font.GothamBold
+    MobileBtn.TextSize = 16
+    MobileBtn.Active = true
+    MobileBtn.Draggable = true
+    MobileBtn.Parent = ScreenGui
+
+    local MobileCorner = Instance.new("UICorner", MobileBtn)
+    MobileCorner.CornerRadius = UDim.new(1, 0)
+
+    MobileBtn.MouseButton1Click:Connect(function()
+        MainFrame.Visible = not MainFrame.Visible
+    end)
+
+    -- Tab Container
+    local TabContainer = Instance.new("Frame")
+    TabContainer.Name = "TabContainer"
+    TabContainer.Size = UDim2.new(0, 140, 1, -50)
+    TabContainer.Position = UDim2.new(0, 10, 0, 45)
+    TabContainer.BackgroundColor3 = VIREX.Theme.Sidebar
+    TabContainer.Parent = MainFrame
+
+    local TabCorner = Instance.new("UICorner", TabContainer)
+    TabCorner.CornerRadius = UDim.new(0, 8)
+
+    local TabListLayout = Instance.new("UIListLayout", TabContainer)
+    TabListLayout.Padding = UDim.new(0, 5)
+    TabListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+    -- Content Frame
+    local ContentFrame = Instance.new("Frame")
+    ContentFrame.Name = "ContentFrame"
+    ContentFrame.Size = UDim2.new(1, -170, 1, -50)
+    ContentFrame.Position = UDim2.new(0, 160, 0, 45)
+    ContentFrame.BackgroundTransparency = 1
+    ContentFrame.Parent = MainFrame
+
+    local Tabs = {}
+
+    function Tabs:CreateTab(tabName)
+        local TabBtn = Instance.new("TextButton")
+        TabBtn.Size = UDim2.new(1, -10, 0, 32)
+        TabBtn.Position = UDim2.new(0, 5, 0, 0)
+        TabBtn.BackgroundColor3 = VIREX.Theme.Card
+        TabBtn.Text = tabName
+        TabBtn.TextColor3 = VIREX.Theme.SubText
+        TabBtn.Font = Enum.Font.Gotham
+        TabBtn.TextSize = 13
+        TabBtn.Parent = TabContainer
+
+        local BtnCorner = Instance.new("UICorner", TabBtn)
+        BtnCorner.CornerRadius = UDim.new(0, 6)
+
+        local TabPage = Instance.new("ScrollingFrame")
+        TabPage.Size = UDim2.new(1, 0, 1, 0)
+        TabPage.BackgroundTransparency = 1
+        TabPage.ScrollBarThickness = 2
+        TabPage.Visible = false
+        TabPage.Parent = ContentFrame
+
+        local PageLayout = Instance.new("UIListLayout", TabPage)
+        PageLayout.Padding = UDim.new(0, 8)
+
+        TabBtn.MouseButton1Click:Connect(function()
+            for _, child in pairs(ContentFrame:GetChildren()) do
+                if child:IsA("ScrollingFrame") then
+                    child.Visible = false
+                end
+            end
+            for _, btn in pairs(TabContainer:GetChildren()) do
+                if btn:IsA("TextButton") then
+                    btn.TextColor3 = VIREX.Theme.SubText
+                end
+            end
+            TabPage.Visible = true
+            TabBtn.TextColor3 = VIREX.Theme.Accent
+        end)
+
+        local Elements = {}
+
+        -- Element: Toggle
+        function Elements:AddToggle(name, default, callback)
+            callback = callback or function() end
+            local state = default or false
+
+            local ToggleFrame = Instance.new("Frame")
+            ToggleFrame.Size = UDim2.new(1, -5, 0, 35)
+            ToggleFrame.BackgroundColor3 = VIREX.Theme.Card
+            ToggleFrame.Parent = TabPage
+
+            local Corner = Instance.new("UICorner", ToggleFrame)
+            Corner.CornerRadius = UDim.new(0, 6)
+
+            local Label = Instance.new("TextLabel")
+            Label.Size = UDim2.new(1, -50, 1, 0)
+            Label.Position = UDim2.new(0, 10, 0, 0)
+            Label.Text = name
+            Label.TextColor3 = VIREX.Theme.Text
+            Label.Font = Enum.Font.Gotham
+            Label.TextSize = 13
+            Label.TextXAlignment = Enum.TextXAlignment.Left
+            Label.BackgroundTransparency = 1
+            Label.Parent = ToggleFrame
+
+            local Switch = Instance.new("TextButton")
+            Switch.Size = UDim2.new(0, 35, 0, 18)
+            Switch.Position = UDim2.new(1, -45, 0.5, -9)
+            Switch.BackgroundColor3 = state and VIREX.Theme.Accent or VIREX.Theme.Border
+            Switch.Text = ""
+            Switch.Parent = ToggleFrame
+
+            local SwitchCorner = Instance.new("UICorner", Switch)
+            SwitchCorner.CornerRadius = UDim.new(1, 0)
+
+            Switch.MouseButton1Click:Connect(function()
+                state = not state
+                TweenService:Create(Switch, TweenInfo.new(0.2), {
+                    BackgroundColor3 = state and VIREX.Theme.Accent or VIREX.Theme.Border
+                }):Play()
+                pcall(callback, state)
+            end)
+        end
+
+        -- Element: Button
+        function Elements:AddButton(name, callback)
+            callback = callback or function() end
+
+            local Btn = Instance.new("TextButton")
+            Btn.Size = UDim2.new(1, -5, 0, 35)
+            Btn.BackgroundColor3 = VIREX.Theme.Card
+            Btn.Text = name
+            Btn.TextColor3 = VIREX.Theme.Text
+            Btn.Font = Enum.Font.Gotham
+            Btn.TextSize = 13
+            Btn.Parent = TabPage
+
+            local Corner = Instance.new("UICorner", Btn)
+            Corner.CornerRadius = UDim.new(0, 6)
+
+            Btn.MouseButton1Click:Connect(function()
+                pcall(callback)
+            end)
+        end
+
+        return Elements
+    end
+
+    return Tabs
+end
+
+-- =================================================================
+-- ตัวอย่างการนำสคริปต์ไปใช้งาน (Usage Example)
+-- =================================================================
+
+local Window = VIREX:CreateWindow({ Title = "VIREX HUB v2.0" })
+
+VIREX:Notify({
+    Title = "VIREX Loaded",
+    Content = "ยินดีต้อนรับสู่ VIREX UI Library!",
+    Duration = 4
+})
+
+local MainTab = Window:CreateTab("Main")
+local MiscTab = Window:CreateTab("Misc")
+
+MainTab:AddToggle("Auto Farm", false, function(Value)
+    print("Auto Farm State:", Value)
+end)
+
+MainTab:AddButton("Teleport to Spawn", function()
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(0, 50, 0)
+    end
+end)
+
+MiscTab:AddToggle("WalkSpeed Boost", false, function(Value)
+    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Humanoid") then
+        LocalPlayer.Character.Humanoid.WalkSpeed = Value and 32 or 16
+    end
+end)
+
+return VIREX
+			
