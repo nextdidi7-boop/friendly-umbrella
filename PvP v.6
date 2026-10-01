@@ -21,20 +21,19 @@ local HttpService = game:GetService("HttpService")
 local Camera = Workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
 
+-- ค่าเริ่มต้นระบบ (Default Settings)
 _G.Settings = {
     AimbotEnabled = false,
     CameraLock = false,
     AimPart = "Head",
     Smoothness = 0.2,
     FOVEnabled = true,
-    FOVSize = 120,
+    FOVSize = 100,
     RainbowFOV = false,
     TeamCheck = false,
     MaxDistance = 600,
 
-    FireRateVal = 0.05,
-    AutoShootEnabled = false,
-    GodModeEnabled = false,
+    AutoShootOnTarget = false,
 
     WalkSpeedEnabled = false,
     WalkSpeedVal = 16,
@@ -45,8 +44,52 @@ _G.Settings = {
     HealthESP = false,
     ToolESP = false,
     HighlightESP = false,
-    RainbowESP = false,
+    RainbowESP = false
 }
+
+_G.BoobSettings = {
+    Enabled = false,
+    Stiffness = 12,
+    Damping = 0.15,
+    Size = 1.0
+}
+
+-- ระบบ Save / Load Config
+local ConfigFileName = "nextshopPvP_Config.json"
+
+local function SaveConfig()
+    pcall(function()
+        local dataToSave = {
+            Settings = _G.Settings,
+            BoobSettings = _G.BoobSettings
+        }
+        writefile(ConfigFileName, HttpService:JSONEncode(dataToSave))
+    end)
+end
+
+local function LoadConfig()
+    pcall(function()
+        if isfile and isfile(ConfigFileName) then
+            local fileData = readfile(ConfigFileName)
+            local decoded = HttpService:JSONDecode(fileData)
+            
+            if decoded.Settings then
+                for k, v in pairs(decoded.Settings) do
+                    _G.Settings[k] = v
+                end
+            end
+            if decoded.BoobSettings then
+                for k, v in pairs(decoded.BoobSettings) do
+                    _G.BoobSettings[k] = v
+                end
+            end
+        end
+    end)
+end
+
+-- โหลดค่าเดิมขึ้นมาใช้งาน
+LoadConfig()
+_G.SaveConfig = SaveConfig
 
 local PlayerESPFolder = Instance.new("Folder", Workspace)
 PlayerESPFolder.Name = "HUB_PLAYER_ESP"
@@ -55,13 +98,8 @@ local FOVGui = Instance.new("ScreenGui")
 FOVGui.Name = "HUB_FOV_GUI"
 FOVGui.ResetOnSpawn = false
 FOVGui.IgnoreGuiInset = true
-pcall(function()
-    FOVGui.Parent = game:GetService("CoreGui")
-end)
-
-if not FOVGui.Parent then
-    FOVGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
-end
+pcall(function() FOVGui.Parent = game:GetService("CoreGui") end)
+if not FOVGui.Parent then FOVGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
 local FOVCircle = Instance.new("Frame", FOVGui)
 FOVCircle.AnchorPoint = Vector2.new(0.5, 0.5)
@@ -80,24 +118,14 @@ _G.WindUIInstance = WindUI
 _G.PlayerESPFolder = PlayerESPFolder
 _G.FOVStroke = FOVStroke
 _G.FOVCircle = FOVCircle
-
 --========================================================
 -- [PART 2/4] COMBAT, AIMBOT & PHYSICS LOGIC
 --========================================================
 
-local Players = game:GetService("Players")
-local Workspace = game:GetService("Workspace")
-local VirtualUser = game:GetService("VirtualUser")
-local Camera = Workspace.CurrentCamera
-local LocalPlayer = Players.LocalPlayer
-
-local IsReloading = false
-local IsShootingBurst = false
-local LastShootTime = 0
-
-local RayParams = RaycastParams.new()
-RayParams.FilterType = Enum.RaycastFilterType.Exclude
-RayParams.IgnoreWater = true
+local CreatedBoobParts = {}
+local LeftMeshWeld, RightMeshWeld = nil, nil
+local BaseLeftC0 = CFrame.new(-0.42, 0.1, -0.52)
+local BaseRightC0 = CFrame.new(0.42, 0.1, -0.52)
 
 local function GetRainbow(speed)
     local t = (tick() * (speed or 1)) % 5 / 5
@@ -110,14 +138,8 @@ local function isAlive(char)
 end
 
 local function isTeammate(p)
-    if not _G.Settings.TeamCheck then
-        return false
-    end
-
-    if not LocalPlayer.Team or not p.Team then
-        return false
-    end
-
+    if not _G.Settings.TeamCheck then return false end
+    if not LocalPlayer.Team or not p.Team then return false end
     return p.Team == LocalPlayer.Team
 end
 
@@ -125,106 +147,102 @@ local function getEquippedTool()
     return LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
 end
 
-local function GetClosestTarget()
-    local center = Vector2.new(
-        Camera.ViewportSize.X / 2,
-        Camera.ViewportSize.Y / 2
-    )
+local RayParams = RaycastParams.new()
+RayParams.FilterType = Enum.RaycastFilterType.Blacklist
+RayParams.IgnoreWater = true
 
+local function isVisible(part, char)
+    RayParams.FilterDescendantsInstances = {LocalPlayer.Character, char}
+    local origin = Camera.CFrame.Position
+    local dir = part.Position - origin
+    return not Workspace:Raycast(origin, dir, RayParams)
+end
+
+local function GetClosestTarget()
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
     local closest, target = _G.Settings.FOVSize, nil
 
     for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer
-            and p.Character
-            and isAlive(p.Character)
-            and not isTeammate(p) then
-
-            local part =
-                p.Character:FindFirstChild(_G.Settings.AimPart)
-                or p.Character:FindFirstChild("Head")
-
+        if p ~= LocalPlayer and p.Character and isAlive(p.Character) and not isTeammate(p) then
+            local part = p.Character:FindFirstChild(_G.Settings.AimPart) or p.Character:FindFirstChild("Head")
             local hrp = p.Character:FindFirstChild("HumanoidRootPart")
-
-            if part
-                and hrp
-                and (Camera.CFrame.Position - hrp.Position).Magnitude
-                    <= _G.Settings.MaxDistance then
-
-                local s, on = Camera:WorldToViewportPoint(part.Position)
-
-                if on then
-                    local d = (
-                        Vector2.new(s.X, s.Y) - center
-                    ).Magnitude
-
-                    if d < closest then
-                        closest = d
-                        target = part
+            if part and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= _G.Settings.MaxDistance then
+                if isVisible(part, p.Character) then
+                    local s, on = Camera:WorldToViewportPoint(part.Position)
+                    if on then
+                        local d = (Vector2.new(s.X, s.Y) - center).Magnitude
+                        if d < closest then
+                            closest = d
+                            target = part
+                        end
                     end
                 end
             end
         end
     end
-
     return target
 end
 
--- ระบบยิงปืน
-local function fireGun()
-    if IsReloading then
-        return
+_G.DestroyBoobs = function()
+    for _, v in ipairs(CreatedBoobParts) do
+        if v and v.Parent then pcall(function() v:Destroy() end) end
+    end
+    CreatedBoobParts = {}
+    LeftMeshWeld, RightMeshWeld = nil, nil
+end
+
+_G.BuildSoftBoob = function(char)
+    _G.DestroyBoobs()
+    if not char or not char.Parent then return end
+
+    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    local head = char:FindFirstChild("Head")
+    if not torso then return end
+
+    local skinCol = head and head.Color or torso.Color
+    local pink1, pink2 = Color3.fromRGB(255, 130, 155), Color3.fromRGB(255, 80, 120)
+    local s = _G.BoobSettings.Size
+
+    local function createSphere(cf, size, col, parentWeld)
+        local p = Instance.new("Part")
+        p.Shape = Enum.PartType.Ball
+        p.Size = size
+        p.Color = col
+        p.Material = Enum.Material.SmoothPlastic
+        p.CanCollide = false
+        p.Massless = true
+        p.Parent = char
+
+        local w = Instance.new("Weld")
+        w.Part0 = parentWeld or torso
+        w.Part1 = p
+        w.C0 = cf
+        w.Parent = p
+
+        table.insert(CreatedBoobParts, p)
+        return p, w
     end
 
-    local tool = getEquippedTool()
+    local lMain, lW = createSphere(BaseLeftC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
+    local rMain, rW = createSphere(BaseRightC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
+    LeftMeshWeld, RightMeshWeld = lW, rW
 
-    if tool then
-        tool:Activate()
-
-        VirtualUser:Button1Down(
-            Vector2.new(0, 0),
-            Camera.CFrame
-        )
-
-        task.wait(_G.Settings.FireRateVal)
-
-        VirtualUser:Button1Up(
-            Vector2.new(0, 0),
-            Camera.CFrame
-        )
-
-        tool:Deactivate()
-    end
+    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, lMain)
+    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, rMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, lMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, rMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, lMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, rMain)
 end
 
 _G.GetRainbow = GetRainbow
 _G.isAlive = isAlive
 _G.isTeammate = isTeammate
 _G.getEquippedTool = getEquippedTool
-_G.fireGun = fireGun
 _G.GetClosestTarget = GetClosestTarget
-_G.IsShootingBurst = IsShootingBurst
-_G.LastShootTime = LastShootTime
 --========================================================
--- [PART 3/4] ESP SYSTEM & UPDATER LOOPS (FIXED CAMERA)
+-- [PART 3/4] ESP SYSTEM & UPDATER LOOPS
 --========================================================
-
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
-local UserInputService = game:GetService("UserInputService")
-local Lighting = game:GetService("Lighting")
-local TeleportService = game:GetService("TeleportService")
-local HttpService = game:GetService("HttpService")
-
-local Camera = Workspace.CurrentCamera
-local LocalPlayer = Players.LocalPlayer
-
-local GetRainbow = _G.GetRainbow
-local isAlive = _G.isAlive
-local isTeammate = _G.isTeammate
-local getEquippedTool = _G.getEquippedTool
-local fireGun = _G.fireGun
-local GetClosestTarget = _G.GetClosestTarget
 
 local PlayerESPFolder = _G.PlayerESPFolder
 local FOVStroke = _G.FOVStroke
@@ -233,74 +251,42 @@ local FOVCircle = _G.FOVCircle
 local HIGHLIGHT_CACHE = {}
 
 local function RemovePlayerESP(Player)
-    local Folder = PlayerESPFolder:FindFirstChild(
-        tostring(Player.UserId)
-    )
-
-    if Folder then
-        Folder:Destroy()
-    end
-
+    local Folder = PlayerESPFolder:FindFirstChild(tostring(Player.UserId))
+    if Folder then Folder:Destroy() end
     if HIGHLIGHT_CACHE[Player] then
-        pcall(function()
-            HIGHLIGHT_CACHE[Player]:Destroy()
-        end)
-
+        pcall(function() HIGHLIGHT_CACHE[Player]:Destroy() end)
         HIGHLIGHT_CACHE[Player] = nil
     end
 end
 
 local function CreatePlayerESP(Player)
-    if Player == LocalPlayer then
-        return
-    end
-
+    if Player == LocalPlayer then return end
     local Character = Player.Character
-
-    if not Character or not isAlive(Character) then
-        return
-    end
-
+    if not Character or not isAlive(Character) then return end
     local Head = Character:FindFirstChild("Head")
     local Humanoid = Character:FindFirstChildOfClass("Humanoid")
-
-    if not Head or not Humanoid then
-        return
-    end
+    if not Head or not Humanoid then return end
 
     RemovePlayerESP(Player)
 
     local Folder = Instance.new("Folder", PlayerESPFolder)
     Folder.Name = tostring(Player.UserId)
 
-    if _G.Settings.HighlightESP
-        or _G.Settings.RainbowESP then
-
+    if _G.Settings.HighlightESP or _G.Settings.RainbowESP then
         local Highlight = Instance.new("Highlight")
-
         Highlight.Name = "PlayerHighlight"
         Highlight.Adornee = Character
         Highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
         Highlight.FillTransparency = 0.75
         Highlight.OutlineTransparency = 0
         Highlight.FillColor = Color3.fromRGB(255, 0, 0)
-
-        Highlight.OutlineColor =
-            _G.Settings.RainbowESP
-            and GetRainbow(0.25)
-            or Color3.fromRGB(255, 255, 255)
-
+        Highlight.OutlineColor = _G.Settings.RainbowESP and GetRainbow(0.25) or Color3.fromRGB(255, 255, 255)
         Highlight.Parent = Folder
-
         HIGHLIGHT_CACHE[Player] = Highlight
     end
 
-    if _G.Settings.NameESP
-        or _G.Settings.HealthESP
-        or _G.Settings.ToolESP then
-
+    if _G.Settings.NameESP or _G.Settings.HealthESP or _G.Settings.ToolESP then
         local Billboard = Instance.new("BillboardGui", Folder)
-
         Billboard.Name = "PlayerInfo"
         Billboard.Adornee = Head
         Billboard.AlwaysOnTop = true
@@ -308,185 +294,71 @@ local function CreatePlayerESP(Player)
         Billboard.StudsOffset = Vector3.new(0, 3, 0)
 
         local Container = Instance.new("Frame", Billboard)
-
         Container.BackgroundTransparency = 1
         Container.Size = UDim2.fromScale(1, 1)
 
         local Layout = Instance.new("UIListLayout", Container)
-
-        Layout.HorizontalAlignment =
-            Enum.HorizontalAlignment.Center
-
-        Layout.VerticalAlignment =
-            Enum.VerticalAlignment.Center
-
+        Layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        Layout.VerticalAlignment = Enum.VerticalAlignment.Center
         Layout.Padding = UDim.new(0, 2)
 
         if _G.Settings.NameESP then
-            local NameLabel = Instance.new(
-                "TextLabel",
-                Container
-            )
-
+            local NameLabel = Instance.new("TextLabel", Container)
             NameLabel.BackgroundTransparency = 1
             NameLabel.Size = UDim2.fromOffset(210, 22)
-
-            NameLabel.Text =
-                Player.DisplayName
-                .. " (@"
-                .. Player.Name
-                .. ")"
-
-            NameLabel.TextColor3 =
-                Color3.fromRGB(255, 255, 255)
-
+            NameLabel.Text = Player.DisplayName .. " (@" .. Player.Name .. ")"
+            NameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
             NameLabel.TextStrokeTransparency = 0
             NameLabel.TextScaled = true
             NameLabel.Font = Enum.Font.GothamBold
         end
 
         if _G.Settings.HealthESP then
-            local HealthBack = Instance.new(
-                "Frame",
-                Container
-            )
-
-            HealthBack.Size =
-                UDim2.fromOffset(140, 10)
-
-            HealthBack.BackgroundColor3 =
-                Color3.fromRGB(35, 35, 35)
-
+            local HealthBack = Instance.new("Frame", Container)
+            HealthBack.Size = UDim2.fromOffset(140, 10)
+            HealthBack.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
             HealthBack.BorderSizePixel = 0
+            Instance.new("UICorner", HealthBack).CornerRadius = UDim.new(1, 0)
 
-            Instance.new(
-                "UICorner",
-                HealthBack
-            ).CornerRadius = UDim.new(1, 0)
-
-            local HealthBar = Instance.new(
-                "Frame",
-                HealthBack
-            )
-
-            HealthBar.Size =
-                UDim2.fromScale(
-                    math.clamp(
-                        Humanoid.Health
-                        / math.max(Humanoid.MaxHealth, 1),
-                        0,
-                        1
-                    ),
-                    1
-                )
-
-            HealthBar.BackgroundColor3 =
-                Color3.fromRGB(50, 255, 100)
-
+            local HealthBar = Instance.new("Frame", HealthBack)
+            HealthBar.Size = UDim2.fromScale(math.clamp(Humanoid.Health / math.max(Humanoid.MaxHealth, 1), 0, 1), 1)
+            HealthBar.BackgroundColor3 = Color3.fromRGB(50, 255, 100)
             HealthBar.BorderSizePixel = 0
+            Instance.new("UICorner", HealthBar).CornerRadius = UDim.new(1, 0)
 
-            Instance.new(
-                "UICorner",
-                HealthBar
-            ).CornerRadius = UDim.new(1, 0)
-
-            local HPText = Instance.new(
-                "TextLabel",
-                Container
-            )
-
+            local HPText = Instance.new("TextLabel", Container)
             HPText.BackgroundTransparency = 1
             HPText.Size = UDim2.fromOffset(210, 18)
-
-            HPText.Text =
-                math.floor(Humanoid.Health)
-                .. " / "
-                .. math.floor(Humanoid.MaxHealth)
-                .. " HP"
-
-            HPText.TextColor3 =
-                Color3.fromRGB(255, 255, 255)
-
+            HPText.Text = math.floor(Humanoid.Health) .. " / " .. math.floor(Humanoid.MaxHealth) .. " HP"
+            HPText.TextColor3 = Color3.fromRGB(255, 255, 255)
             HPText.TextStrokeTransparency = 0
             HPText.TextScaled = true
             HPText.Font = Enum.Font.Gotham
 
-            Humanoid.HealthChanged:Connect(
-                function(Health)
-                    if not HealthBar.Parent then
-                        return
-                    end
-
-                    local MaxHealth =
-                        math.max(
-                            Humanoid.MaxHealth,
-                            1
-                        )
-
-                    HealthBar.Size =
-                        UDim2.fromScale(
-                            math.clamp(
-                                Health / MaxHealth,
-                                0,
-                                1
-                            ),
-                            1
-                        )
-
-                    HPText.Text =
-                        math.floor(Health)
-                        .. " / "
-                        .. math.floor(MaxHealth)
-                        .. " HP"
-                end
-            )
+            Humanoid.HealthChanged:Connect(function(Health)
+                if not HealthBar.Parent then return end
+                local MaxHealth = math.max(Humanoid.MaxHealth, 1)
+                HealthBar.Size = UDim2.fromScale(math.clamp(Health / MaxHealth, 0, 1), 1)
+                HPText.Text = math.floor(Health) .. " / " .. math.floor(MaxHealth) .. " HP"
+            end)
         end
 
         if _G.Settings.ToolESP then
-            local ToolLabel = Instance.new(
-                "TextLabel",
-                Container
-            )
-
+            local ToolLabel = Instance.new("TextLabel", Container)
             ToolLabel.BackgroundTransparency = 1
-            ToolLabel.Size =
-                UDim2.fromOffset(210, 20)
-
-            ToolLabel.TextColor3 =
-                Color3.fromRGB(255, 220, 80)
-
+            ToolLabel.Size = UDim2.fromOffset(210, 20)
+            ToolLabel.TextColor3 = Color3.fromRGB(255, 220, 80)
             ToolLabel.TextStrokeTransparency = 0
             ToolLabel.TextScaled = true
             ToolLabel.Font = Enum.Font.GothamBold
 
             local function UpdateTool()
-                local t =
-                    Character:FindFirstChildOfClass("Tool")
-
-                ToolLabel.Text =
-                    "ถือ: "
-                    .. (t and t.Name or "-")
+                local t = Character:FindFirstChildOfClass("Tool")
+                ToolLabel.Text = "ถือ: " .. (t and t.Name or "-")
             end
-
             UpdateTool()
-
-            Character.ChildAdded:Connect(
-                function(o)
-                    if o:IsA("Tool") then
-                        task.wait()
-                        UpdateTool()
-                    end
-                end
-            )
-
-            Character.ChildRemoved:Connect(
-                function(o)
-                    if o:IsA("Tool") then
-                        task.wait()
-                        UpdateTool()
-                    end
-                end
-            )
+            Character.ChildAdded:Connect(function(o) if o:IsA("Tool") then task.wait(); UpdateTool() end end)
+            Character.ChildRemoved:Connect(function(o) if o:IsA("Tool") then task.wait(); UpdateTool() end end)
         end
     end
 end
@@ -494,124 +366,52 @@ end
 _G.RefreshPlayerESP = function()
     for _, Player in ipairs(Players:GetPlayers()) do
         if Player ~= LocalPlayer then
-            if Player.Character then
-                CreatePlayerESP(Player)
-            end
-
-            Player.CharacterAdded:Connect(
-                function()
-                    task.wait(0.5)
-
-                    if Player.Character then
-                        CreatePlayerESP(Player)
-                    end
-                end
-            )
+            if Player.Character then CreatePlayerESP(Player) end
+            Player.CharacterAdded:Connect(function()
+                task.wait(0.5)
+                if Player.Character then CreatePlayerESP(Player) end
+            end)
         end
     end
 end
 
 RunService.Stepped:Connect(function()
-    if _G.Settings.GodModeEnabled
-        and LocalPlayer.Character then
-
-        local hum =
-            LocalPlayer.Character:FindFirstChildOfClass(
-                "Humanoid"
-            )
-
-        if hum then
-            hum.Health = hum.MaxHealth
-        end
-    end
-
-    if _G.Settings.WalkSpeedEnabled
-        and LocalPlayer.Character then
-
-        local hum =
-            LocalPlayer.Character:FindFirstChildOfClass(
-                "Humanoid"
-            )
-
-        if hum then
-            hum.WalkSpeed =
-                _G.Settings.WalkSpeedVal
-        end
+    if _G.Settings.WalkSpeedEnabled and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.WalkSpeed = _G.Settings.WalkSpeedVal end
     end
 end)
--- ลูปอัปเดตเป้าหมาย
+
 RunService.RenderStepped:Connect(function()
-    FOVCircle.Visible =
-        _G.Settings.FOVEnabled
-
-    local Size =
-        math.clamp(
-            _G.Settings.FOVSize,
-            1,
-            300
-        )
-
-    FOVCircle.Size =
-        UDim2.fromOffset(
-            Size * 2,
-            Size * 2
-        )
-
-    FOVStroke.Color =
-        _G.Settings.RainbowFOV
-        and GetRainbow(1)
-        or Color3.fromRGB(
-            255,
-            255,
-            255
-        )
+    FOVCircle.Visible = _G.Settings.FOVEnabled
+    local Size = math.clamp(_G.Settings.FOVSize, 1, 300)
+    FOVCircle.Size = UDim2.fromOffset(Size * 2, Size * 2)
+    FOVStroke.Color = _G.Settings.RainbowFOV and GetRainbow(1) or Color3.fromRGB(255, 255, 255)
 
     local Target = GetClosestTarget()
 
     if Target then
         if _G.Settings.AimbotEnabled then
             local CurrentCF = Camera.CFrame
-
-            local TargetCF =
-                CFrame.lookAt(
-                    CurrentCF.Position,
-                    Target.Position
-                )
-
-            Camera.CFrame =
-                CurrentCF:Lerp(
-                    TargetCF,
-                    _G.Settings.Smoothness
-                )
+            local TargetCF = CFrame.lookAt(CurrentCF.Position, Target.Position)
+            Camera.CFrame = CurrentCF:Lerp(TargetCF, _G.Settings.Smoothness)
         end
 
         if _G.Settings.CameraLock then
-            Camera.CFrame =
-                CFrame.new(
-                    Camera.CFrame.Position,
-                    Target.Position
-                )
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, Target.Position)
         end
 
-        -- ยิงอัตโนมัติเมื่อมีเป้าหมายผู้เล่นอยู่ใน FOV
-        if _G.Settings.AutoShootEnabled
-            and getEquippedTool() then
-
-            if tick() - _G.LastShootTime
-                >= _G.Settings.FireRateVal then
-
-                _G.LastShootTime = tick()
-                fireGun()
+        if _G.Settings.AutoShootOnTarget then
+            local tool = getEquippedTool()
+            if tool then
+                tool:Activate()
             end
         end
     end
 
     if _G.Settings.RainbowESP then
         for _, h in pairs(HIGHLIGHT_CACHE) do
-            if h then
-                h.OutlineColor =
-                    GetRainbow(0.25)
-            end
+            if h then h.OutlineColor = GetRainbow(0.25) end
         end
     end
 
@@ -622,129 +422,247 @@ RunService.RenderStepped:Connect(function()
 end)
 
 UserInputService.JumpRequest:Connect(function()
-    if _G.Settings.InfiniteJumpEnabled
-        and LocalPlayer.Character then
-
-        local hum =
-            LocalPlayer.Character:FindFirstChildOfClass(
-                "Humanoid"
-            )
-
-        if hum then
-            hum:ChangeState(
-                Enum.HumanoidStateType.Jumping
-            )
-        end
+    if _G.Settings.InfiniteJumpEnabled and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
     end
 end)
 
 local function setupCharacterEvents(char)
-    if not char then
-        return
-    end
-
-    local hum =
-        char:WaitForChild(
-            "Humanoid",
-            3
-        )
+    if not char then return end
+    if _G.BoobSettings.Enabled then _G.BuildSoftBoob(char) end
 end
 
-if LocalPlayer.Character then
-    setupCharacterEvents(
-        LocalPlayer.Character
-    )
-end
+if LocalPlayer.Character then setupCharacterEvents(LocalPlayer.Character) end
+LocalPlayer.CharacterAdded:Connect(setupCharacterEvents)
 
-LocalPlayer.CharacterAdded:Connect(
-    setupCharacterEvents
-)
+Players.PlayerAdded:Connect(function(Player)
+    Player.CharacterAdded:Connect(function()
+        task.wait(0.5)
+        if Player.Character then CreatePlayerESP(Player) end
+    end)
+end)
 
-Players.PlayerAdded:Connect(
-    function(Player)
-        Player.CharacterAdded:Connect(
-            function()
-                task.wait(0.5)
-
-                if Player.Character then
-                    CreatePlayerESP(
-                        Player
-                    )
-                end
-            end
-        )
-    end
-)
-
-Players.PlayerRemoving:Connect(
-    function(Player)
-        RemovePlayerESP(Player)
-    end
-)
-
---========================================================
--- ระบบย้ายไปเซิร์ฟเวอร์ที่มีผู้เล่นน้อย
---========================================================
+Players.PlayerRemoving:Connect(function(Player)
+    RemovePlayerESP(Player)
+end)
 
 _G.joinLowPlayerServer = function()
-    local baseUrl =
-        "https://games.roblox.com/v1/games/"
-        .. game.PlaceId
-        .. "/servers/Public?sortOrder=Asc&limit=100"
+    local placeId = game.PlaceId
+    local cursor = ""
+    local lowestServer = nil
+    local minPlayers = math.huge
 
-    local cursor = nil
-    local bestServer = nil
-    local bestPlayers = math.huge
-
-    for _ = 1, 5 do
-        local url =
-            baseUrl
-            .. (
-                cursor
-                and "&cursor="
-                    .. HttpService:UrlEncode(cursor)
-                or ""
-            )
-
-        local success, result =
-            pcall(
-                function()
-                    return HttpService:JSONDecode(
-                        game:HttpGet(url)
-                    )
+    pcall(function()
+        repeat
+            local url = "https://games.roblox.com/v1/games/" .. placeId .. "/servers/Public?sortOrder=Asc&limit=100" .. (cursor ~= "" and "&cursor=" .. cursor or "")
+            local response = HttpService:JSONDecode(game:HttpGet(url))
+            if response and response.data then
+                for _, server in ipairs(response.data) do
+                    if server.id ~= game.JobId and server.playing < server.maxPlayers then
+                        if server.playing < minPlayers then
+                            minPlayers = server.playing
+                            lowestServer = server.id
+                        end
+                    end
                 end
-            )
-
-        if not success
-            or not result
-            or not result.data then
-            break
-        end
-
-        for _, server in ipairs(result.data) do
-            if server.id ~= game.JobId
-                and tonumber(server.playing)
-                and tonumber(server.maxPlayers)
-                and server.playing < server.maxPlayers
-                and server.playing < bestPlayers then
-
-                bestServer = server
-                bestPlayers = server.playing
+                cursor = response.nextPageCursor or ""
+            else
+                break
             end
+        until lowestServer or not cursor or cursor == ""
+
+        if lowestServer then
+            TeleportService:TeleportToPlaceInstance(placeId, lowestServer, LocalPlayer)
         end
-
-        cursor = result.nextPageCursor
-
-        if not cursor then
-            break
-        end
-    end
-
-    if bestServer then
-        TeleportService:TeleportToPlaceInstance(
-            game.PlaceId,
-            bestServer.id,
-            LocalPlayer
-        )
-    end
+    end)
 end
+--========================================================
+-- [PART 4/4] WINDUI INTERFACE
+--========================================================
+
+local WindUI = _G.WindUIInstance
+local Settings = _G.Settings
+local BoobSettings = _G.BoobSettings
+local SaveConfig = _G.SaveConfig
+
+local Window = WindUI:CreateWindow({
+    Title = "nextshopPvP",
+    Icon = "crosshair",
+    Author = "BOON Hun & Refactored",
+    Folder = "BlockSpinHubMaster"
+})
+
+-- TAB: COMBAT & AIMBOT
+local CombatTab = Window:Tab({ Title = "ระบบต่อสู้ & เล็ง", Icon = "crosshair" })
+
+CombatTab:Toggle({
+    Title = "เปิดใช้งาน Aimbot (Camera Smooth)",
+    Value = Settings.AimbotEnabled,
+    Callback = function(v) Settings.AimbotEnabled = v; SaveConfig() end
+})
+
+CombatTab:Toggle({
+    Title = "Camera Lock (ล็อคตรงทันที)",
+    Value = Settings.CameraLock,
+    Callback = function(v) Settings.CameraLock = v; SaveConfig() end
+})
+
+CombatTab:Dropdown({
+    Title = "ส่วนที่ต้องการล็อค",
+    Values = {"หัว", "ลำตัว"},
+    Value = Settings.AimPart,
+    Callback = function(v) Settings.AimPart = v; SaveConfig() end
+})
+
+CombatTab:Slider({
+    Title = "ความลื่นล็อค (Aimbot Smoothness)",
+    Step = 0.05,
+    Value = { Min = 0.05, Max = 1, Default = Settings.Smoothness },
+    Callback = function(v) Settings.Smoothness = v; SaveConfig() end
+})
+
+CombatTab:Toggle({
+    Title = "ไม่ล็อค/ยิง เพื่อนร่วมทีม",
+    Value = Settings.TeamCheck,
+    Callback = function(v) Settings.TeamCheck = v; SaveConfig() end
+})
+
+-- TAB: GUN MODS
+local GunTab = Window:Tab({ Title = "ปรับแต่งปืน", Icon = "zap" })
+
+GunTab:Toggle({
+    Title = "ยิงอัตโนมัติเมื่อเล็งผู้เล่น (Auto Fire On Target)",
+    Value = Settings.AutoShootOnTarget,
+    Callback = function(v) Settings.AutoShootOnTarget = v; SaveConfig() end
+})
+
+-- TAB: FOV
+local FOVTab = Window:Tab({ Title = "วงกลม FOV", Icon = "circle" })
+
+FOVTab:Toggle({
+    Title = "แสดงวง FOV",
+    Value = Settings.FOVEnabled,
+    Callback = function(v) Settings.FOVEnabled = v; SaveConfig() end
+})
+
+FOVTab:Slider({
+    Title = "ขนาดวง FOV",
+    Step = 1,
+    Value = { Min = 1, Max = 1500, Default = Settings.FOVSize },
+    Callback = function(v) Settings.FOVSize = v; SaveConfig() end
+})
+
+FOVTab:Toggle({
+    Title = "วง FOV สีรุ้ง",
+    Value = Settings.RainbowFOV,
+    Callback = function(v) Settings.RainbowFOV = v; SaveConfig() end
+})
+
+-- TAB: HITBOX & MODS
+local ModTab = Window:Tab({ Title = "ฮิตบ็อกซ์ & ตัวละคร", Icon = "user-check" })
+
+ModTab:Toggle({
+    Title = "ปรับความเร็วการเดิน (WalkSpeed)",
+    Value = Settings.WalkSpeedEnabled,
+    Callback = function(v) Settings.WalkSpeedEnabled = v; SaveConfig() end
+})
+
+ModTab:Slider({
+    Title = "ความเร็ว WalkSpeed",
+    Step = 1,
+    Value = { Min = 16, Max = 200, Default = Settings.WalkSpeedVal },
+    Callback = function(v) Settings.WalkSpeedVal = v; SaveConfig() end
+})
+
+ModTab:Toggle({
+    Title = "Infinite Jump (กระโดดไม่จำกัด)",
+    Value = Settings.InfiniteJumpEnabled,
+    Callback = function(v) Settings.InfiniteJumpEnabled = v; SaveConfig() end
+})
+
+-- TAB: ESP & VISUALS
+local VisualTab = Window:Tab({ Title = "ระบบแสดงผล (ESP)", Icon = "eye" })
+
+VisualTab:Toggle({
+    Title = "มองชื่อผู้เล่น",
+    Value = Settings.NameESP,
+    Callback = function(v) Settings.NameESP = v; _G.RefreshPlayerESP(); SaveConfig() end
+})
+
+VisualTab:Toggle({
+    Title = "มองหลอดเลือด (HP)",
+    Value = Settings.HealthESP,
+    Callback = function(v) Settings.HealthESP = v; _G.RefreshPlayerESP(); SaveConfig() end
+})
+
+VisualTab:Toggle({
+    Title = "มองของที่ผู้เล่นถือ",
+    Value = Settings.ToolESP,
+    Callback = function(v) Settings.ToolESP = v; _G.RefreshPlayerESP(); SaveConfig() end
+})
+
+VisualTab:Toggle({
+    Title = "กรอบเรืองแสงผู้เล่น (Highlight)",
+    Value = Settings.HighlightESP,
+    Callback = function(v) Settings.HighlightESP = v; _G.RefreshPlayerESP(); SaveConfig() end
+})
+
+VisualTab:Toggle({
+    Title = "กรอบเรืองแสงสีรุ้ง (Rainbow Chams)",
+    Value = Settings.RainbowESP,
+    Callback = function(v) Settings.RainbowESP = v; _G.RefreshPlayerESP(); SaveConfig() end
+})
+
+-- TAB: MISC & FUN PHYSICS
+local MiscTab = Window:Tab({ Title = "ระบบเสริม & เซิร์ฟเวอร์", Icon = "sliders" })
+
+MiscTab:Toggle({
+    Title = "เปิดใช้งาน Boob Physics (Soft-Body)",
+    Value = BoobSettings.Enabled,
+    Callback = function(v)
+        BoobSettings.Enabled = v
+        if v and game.Players.LocalPlayer.Character then
+            _G.BuildSoftBoob(game.Players.LocalPlayer.Character)
+        else
+            _G.DestroyBoobs()
+        end
+        SaveConfig()
+    end
+})
+
+MiscTab:Slider({
+    Title = "ขนาด นม",
+    Step = 0.1,
+    Value = { Min = 0.5, Max = 3, Default = BoobSettings.Size },
+    Callback = function(v)
+        BoobSettings.Size = v
+        if BoobSettings.Enabled and game.Players.LocalPlayer.Character then
+            _G.BuildSoftBoob(game.Players.LocalPlayer.Character)
+        end
+        SaveConfig()
+    end
+})
+
+MiscTab:Toggle({
+    Title = "Fullbright (สว่างทั้งแมพ)",
+    Value = Settings.FullbrightEnabled,
+    Callback = function(v)
+        Settings.FullbrightEnabled = v
+        if not v then
+            game:GetService("Lighting").Brightness = 1
+            game:GetService("Lighting").ClockTime = 12
+        end
+        SaveConfig()
+    end
+})
+
+MiscTab:Button({
+    Title = "ย้ายไปเซิร์ฟเวอร์ที่มีคนน้อย (Server Hop)",
+    Callback = function()
+        _G.joinLowPlayerServer()
+    end
+})
+
+_G.RefreshPlayerESP()
+print("BLOCKSPIN MASTER COMBAT & ESP HUB LOADED SUCCESSFULLY WITH AUTO-SAVE!")
