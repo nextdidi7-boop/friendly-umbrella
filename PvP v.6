@@ -1,5 +1,5 @@
 --========================================================
--- [PART 1/3] UI LOADER & GLOBAL CONFIGURATION
+-- [PART 1/4] UI LOADER & GLOBAL CONFIGURATION
 --========================================================
 
 local WindUI
@@ -25,6 +25,7 @@ local LocalPlayer = Players.LocalPlayer
 _G.Settings = {
     AimbotEnabled = false,
     SilentAim = true,
+    CameraLock = false,
     AimPart = "Head",
     Smoothness = 0.2,
     FOVEnabled = true,
@@ -33,10 +34,17 @@ _G.Settings = {
     TeamCheck = false,
     MaxDistance = 600,
 
+    -- ระบบ Triggerbot (เล็งแล้วยิงอัตโนมัติ)
+    TriggerbotEnabled = true,
+    TriggerbotDistance = 500,
+
     FireRateVal = 0.05,
-    AutoShootEnabled = true, -- ยิงให้อัตโนมัติเมื่อ FOV เล็งโดน
+    AutoShootEnabled = false,
+    AutoReturnFire = false,
+    BurstTwoEnabled = false,
     AutoReloadEnabled = false,
     ReloadSpeedVal = 0.1,
+    GodModeEnabled = false,
 
     WalkSpeedEnabled = false,
     WalkSpeedVal = 16,
@@ -47,13 +55,20 @@ _G.Settings = {
     BigHeadSize = 5,
     FullbrightEnabled = false,
 
-    NameESP = true,
+    NameESP = false,
     HealthESP = false,
     ToolESP = false,
     HighlightESP = false,
     RainbowESP = false,
     NPC_ESP = false,
     WorldESP = false
+}
+
+_G.BoobSettings = {
+    Enabled = false,
+    Stiffness = 12,
+    Damping = 0.15,
+    Size = 1.0
 }
 
 local PlayerESPFolder = Instance.new("Folder", Workspace)
@@ -93,12 +108,19 @@ _G.WorldESPFolder = WorldESPFolder
 _G.FOVStroke = FOVStroke
 _G.FOVCircle = FOVCircle
 _G.AimLine = AimLine
+
 --========================================================
--- [PART 2/3] COMBAT & AIMBOT LOGIC
+-- [PART 2/4] COMBAT, AIMBOT & PHYSICS LOGIC
 --========================================================
 
 local IsReloading = false
-local LastShootTime = 0
+local IsShootingBurst = false
+_G.LastShootTime = 0
+
+local CreatedBoobParts = {}
+local LeftMeshWeld, RightMeshWeld = nil, nil
+local BaseLeftC0 = CFrame.new(-0.42, 0.1, -0.52)
+local BaseRightC0 = CFrame.new(0.42, 0.1, -0.52)
 
 local function GetRainbow(speed)
     local t = (tick() * (speed or 1)) % 5 / 5
@@ -120,10 +142,12 @@ local function getEquippedTool()
     return LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
 end
 
--- หาเป้าหมายที่อยู่ใกล้จุดศูนย์กลาง FOV มากที่สุด
+local RayParams = RaycastParams.new()
+RayParams.FilterType = Enum.RaycastFilterType.Exclude
+RayParams.IgnoreWater = true
 local function GetClosestTarget()
     local center = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
-    local closest, targetPart, targetPlayer = _G.Settings.FOVSize, nil, nil
+    local closest, target = _G.Settings.FOVSize, nil
 
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character and isAlive(p.Character) and not isTeammate(p) then
@@ -135,16 +159,16 @@ local function GetClosestTarget()
                     local d = (Vector2.new(s.X, s.Y) - center).Magnitude
                     if d < closest then
                         closest = d
-                        targetPart = part
-                        targetPlayer = p
+                        target = part
                     end
                 end
             end
         end
     end
-    return targetPart, targetPlayer
+    return target
 end
 
+-- ฟังก์ชันยิงปืน
 local function fireGun()
     if IsReloading then return end
     local tool = getEquippedTool()
@@ -155,6 +179,16 @@ local function fireGun()
         VirtualUser:Button1Up(Vector2.new(0, 0), Camera.CFrame)
         tool:Deactivate()
     end
+end
+
+-- ยิงทีละ 2 นัด (Burst Fire)
+local function fireBurstTwo()
+    if IsReloading or IsShootingBurst then return end
+    IsShootingBurst = true
+    fireGun()
+    task.wait(0.04)
+    fireGun()
+    IsShootingBurst = false
 end
 
 local function fastReload()
@@ -179,16 +213,19 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     local args = {...}
 
     if _G.Settings.SilentAim and not checkcaller() then
-        local targetPart, _ = GetClosestTarget()
-        if targetPart then
-            if method == "Raycast" then
+        if method == "Raycast" then
+            local target = GetClosestTarget()
+            if target then
                 local origin = args[1]
-                args[2] = (targetPart.Position - origin).Unit * _G.Settings.MaxDistance
+                args[2] = (target.Position - origin).Unit * _G.Settings.MaxDistance
                 return oldNamecall(self, unpack(args))
-            elseif method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "FindPartOnRay" then
+            end
+        elseif method == "FindPartOnRayWithIgnoreList" or method == "FindPartOnRayWithWhitelist" or method == "FindPartOnRay" then
+            local target = GetClosestTarget()
+            if target then
                 local ray = args[1]
                 if ray then
-                    args[1] = Ray.new(ray.Origin, (targetPart.Position - ray.Origin).Unit * _G.Settings.MaxDistance)
+                    args[1] = Ray.new(ray.Origin, (target.Position - ray.Origin).Unit * _G.Settings.MaxDistance)
                     return oldNamecall(self, unpack(args))
                 end
             end
@@ -198,22 +235,75 @@ oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
     return oldNamecall(self, ...)
 end)
 
+_G.DestroyBoobs = function()
+    for _, v in ipairs(CreatedBoobParts) do
+        if v and v.Parent then pcall(function() v:Destroy() end) end
+    end
+    CreatedBoobParts = {}
+    LeftMeshWeld, RightMeshWeld = nil, nil
+end
+
+_G.BuildSoftBoob = function(char)
+    _G.DestroyBoobs()
+    if not char or not char.Parent then return end
+
+    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    local head = char:FindFirstChild("Head")
+    if not torso then return end
+
+    local skinCol = head and head.Color or torso.Color
+    local pink1, pink2 = Color3.fromRGB(255, 130, 155), Color3.fromRGB(255, 80, 120)
+    local s = _G.BoobSettings.Size
+
+    local function createSphere(cf, size, col, parentWeld)
+        local p = Instance.new("Part")
+        p.Shape = Enum.PartType.Ball
+        p.Size = size
+        p.Color = col
+        p.Material = Enum.Material.SmoothPlastic
+        p.CanCollide = false
+        p.Massless = true
+        p.Parent = char
+
+        local w = Instance.new("Weld")
+        w.Part0 = parentWeld or torso
+        w.Part1 = p
+        w.C0 = cf
+        w.Parent = p
+
+        table.insert(CreatedBoobParts, p)
+        return p, w
+    end
+
+    local lMain, lW = createSphere(BaseLeftC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
+    local rMain, rW = createSphere(BaseRightC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
+    LeftMeshWeld, RightMeshWeld = lW, rW
+
+    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, lMain)
+    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, rMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, lMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, rMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, lMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, rMain)
+end
+
 _G.GetRainbow = GetRainbow
 _G.isAlive = isAlive
 _G.isTeammate = isTeammate
 _G.getEquippedTool = getEquippedTool
 _G.fireGun = fireGun
+_G.fireBurstTwo = fireBurstTwo
 _G.fastReload = fastReload
 _G.GetClosestTarget = GetClosestTarget
+
 --========================================================
--- [PART 3/3] ESP SYSTEM & UPDATER LOOPS
+-- [PART 3/4] ESP SYSTEM & UPDATER LOOPS
 --========================================================
 
 local OriginalSizes = {}
 local WorldCache = {}
 local NPC_CACHE = {}
 local HIGHLIGHT_CACHE = {}
-local NameLabels = {} -- สำหรับเก็บอ้างอิง TextLabel ของ NameESP
 
 local function RemovePlayerESP(Player)
     local Folder = PlayerESPFolder:FindFirstChild(tostring(Player.UserId))
@@ -222,7 +312,6 @@ local function RemovePlayerESP(Player)
         pcall(function() HIGHLIGHT_CACHE[Player]:Destroy() end)
         HIGHLIGHT_CACHE[Player] = nil
     end
-    NameLabels[Player] = nil
 end
 
 local function CreatePlayerESP(Player)
@@ -273,11 +362,10 @@ local function CreatePlayerESP(Player)
             NameLabel.BackgroundTransparency = 1
             NameLabel.Size = UDim2.fromOffset(210, 22)
             NameLabel.Text = Player.DisplayName .. " (@" .. Player.Name .. ")"
-            NameLabel.TextColor3 = Color3.fromRGB(255, 255, 255) -- ค่าเริ่มต้นสีขาว
+            NameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
             NameLabel.TextStrokeTransparency = 0
             NameLabel.TextScaled = true
             NameLabel.Font = Enum.Font.GothamBold
-            NameLabels[Player] = NameLabel
         end
 
         if _G.Settings.HealthESP then
@@ -329,7 +417,6 @@ local function CreatePlayerESP(Player)
         end
     end
 end
-
 _G.RefreshPlayerESP = function()
     for _, Player in ipairs(Players:GetPlayers()) do
         if Player ~= LocalPlayer then
@@ -466,6 +553,11 @@ local function UpdateHitbox()
 end
 
 RunService.Stepped:Connect(function()
+    if _G.Settings.GodModeEnabled and LocalPlayer.Character then
+        local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+        if hum then hum.Health = hum.MaxHealth end
+    end
+
     if _G.Settings.WalkSpeedEnabled and LocalPlayer.Character then
         local hum = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
         if hum then hum.WalkSpeed = _G.Settings.WalkSpeedVal end
@@ -491,7 +583,33 @@ RunService.Stepped:Connect(function()
     end
 end)
 
--- Main Loop
+--========================================================
+-- [PART 4/4] MAIN RENDER LOOP & TRIGGERBOT FUNCTIONALITY
+--========================================================
+
+-- ฟังก์ชันตรวจจับศัตรูใต้เป้าเล็ง (Triggerbot)
+local function GetTargetUnderCrosshair()
+    local mousePos = UserInputService:GetMouseLocation()
+    local unitRay = Camera:ViewportPointToRay(mousePos.X, mousePos.Y)
+    
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    params.FilterDescendantsInstances = {LocalPlayer.Character, PlayerESPFolder, WorldESPFolder}
+    params.IgnoreWater = true
+
+    local result = Workspace:Raycast(unitRay.Origin, unitRay.Direction * _G.Settings.TriggerbotDistance, params)
+    if result and result.Instance then
+        local hitModel = result.Instance:FindFirstAncestorOfClass("Model")
+        if hitModel then
+            local targetPlayer = Players:GetPlayerFromCharacter(hitModel)
+            if targetPlayer and targetPlayer ~= LocalPlayer and isAlive(hitModel) and not isTeammate(targetPlayer) then
+                return targetPlayer
+            end
+        end
+    end
+    return nil
+end
+
 RunService.RenderStepped:Connect(function()
     FOVCircle.Visible = _G.Settings.FOVEnabled
     local Size = math.clamp(_G.Settings.FOVSize, 1, 300)
@@ -499,30 +617,21 @@ RunService.RenderStepped:Connect(function()
     FOVStroke.Color = _G.Settings.RainbowFOV and GetRainbow(1) or Color3.fromRGB(255, 255, 255)
 
     AimLine.Visible = false
-    local TargetPart, TargetPlayer = GetClosestTarget()
+    local Target = GetClosestTarget()
 
-    -- อัปเดตสี ESP Name (เป้าหมาย = สีแดง / คนอื่น = สีขาว)
-    for p, label in pairs(NameLabels) do
-        if label and label.Parent then
-            if p == TargetPlayer then
-                label.TextColor3 = Color3.fromRGB(255, 0, 0) -- เปลี่ยนเป็นสีแดงถ้าเล็งโดน
-            else
-                label.TextColor3 = Color3.fromRGB(255, 255, 255) -- สีขาวปกติ
-            end
-        end
-    end
-
-    if TargetPart then
-        -- Aimbot เล็งกล้อง
+    if Target then
         if _G.Settings.AimbotEnabled then
             local CurrentCF = Camera.CFrame
-            local TargetCF = CFrame.lookAt(CurrentCF.Position, TargetPart.Position)
+            local TargetCF = CFrame.lookAt(CurrentCF.Position, Target.Position)
             Camera.CFrame = CurrentCF:Lerp(TargetCF, _G.Settings.Smoothness)
         end
 
-        -- วาดเส้น Silent Aim
+        if _G.Settings.CameraLock then
+            Camera.CFrame = CFrame.new(Camera.CFrame.Position, Target.Position)
+        end
+
         if _G.Settings.SilentAim then
-            local p, onScreen = Camera:WorldToViewportPoint(TargetPart.Position)
+            local p, onScreen = Camera:WorldToViewportPoint(Target.Position)
             if onScreen then
                 AimLine.From = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
                 AimLine.To = Vector2.new(p.X, p.Y)
@@ -531,11 +640,29 @@ RunService.RenderStepped:Connect(function()
             end
         end
 
-        -- Auto Shoot ยิงต่อเนื่องเมื่อ FOV ชี้โดนเป้าหมาย
         if _G.Settings.AutoShootEnabled and getEquippedTool() then
-            if tick() - LastShootTime >= _G.Settings.FireRateVal then
-                LastShootTime = tick()
-                task.spawn(fireGun)
+            if tick() - _G.LastShootTime > _G.Settings.FireRateVal then
+                _G.LastShootTime = tick()
+                if _G.Settings.BurstTwoEnabled then
+                    fireBurstTwo()
+                else
+                    fireGun()
+                end
+            end
+        end
+    end
+
+    -- ระบบ Triggerbot (ยิงอัตโนมัติเมื่อหันเป้าไปโดนผู้เล่นคนอื่น)
+    if _G.Settings.TriggerbotEnabled and getEquippedTool() then
+        local crosshairTarget = GetTargetUnderCrosshair()
+        if crosshairTarget then
+            if tick() - _G.LastShootTime > _G.Settings.FireRateVal then
+                _G.LastShootTime = tick()
+                if _G.Settings.BurstTwoEnabled then
+                    fireBurstTwo()
+                else
+                    fireGun()
+                end
             end
         end
     end
@@ -558,6 +685,40 @@ UserInputService.JumpRequest:Connect(function()
         if hum then hum:ChangeState(Enum.HumanoidStateType.Jumping) end
     end
 end)
+
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        if _G.Settings.BurstTwoEnabled and getEquippedTool() then
+            fireBurstTwo()
+        end
+    end
+end)
+
+local function setupCharacterEvents(char)
+    if not char then return end
+    if _G.BoobSettings.Enabled then _G.BuildSoftBoob(char) end
+
+    local hum = char:WaitForChild("Humanoid", 3)
+    if hum then
+        hum.HealthChanged:Connect(function()
+            if _G.Settings.AutoReturnFire and getEquippedTool() then
+                local target = GetClosestTarget()
+                if target and (tick() - _G.LastShootTime > _G.Settings.FireRateVal) then
+                    _G.LastShootTime = tick()
+                    if _G.Settings.BurstTwoEnabled then
+                        fireBurstTwo()
+                    else
+                        fireGun()
+                    end
+                end
+            end
+        end)
+    end
+end
+
+if LocalPlayer.Character then setupCharacterEvents(LocalPlayer.Character) end
+LocalPlayer.CharacterAdded:Connect(setupCharacterEvents)
 
 Players.PlayerAdded:Connect(function(Player)
     Player.CharacterAdded:Connect(function()
@@ -582,6 +743,3 @@ _G.joinLowPlayerServer = function()
         end
     end
 end
-
--- Refresh ESP เริ่มต้น
-_G.RefreshPlayerESP()
