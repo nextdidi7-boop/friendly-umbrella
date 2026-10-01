@@ -448,7 +448,7 @@ local Settings = _G.Settings
 local BoobSettings = _G.BoobSettings
 
 local Window = WindUI:CreateWindow({
-    Title = "BLOCKSPIN MOBILE HUB (ALL-IN-ONE)",
+    Title = "nextshopPvP",
     Icon = "crosshair",
     Author = "BOON Hun & Refactored",
     Folder = "BlockSpinHubMaster"
@@ -471,7 +471,7 @@ CombatTab:Toggle({
 
 CombatTab:Dropdown({
     Title = "ส่วนที่ต้องการล็อค",
-    Values = {"Head", "HumanoidRootPart"},
+    Values = {"หัว", "ลำตัว"},
     Value = Settings.AimPart,
     Callback = function(v) Settings.AimPart = v end
 })
@@ -510,7 +510,7 @@ FOVTab:Toggle({
 FOVTab:Slider({
     Title = "ขนาดวง FOV",
     Step = 1,
-    Value = { Min = 1, Max = 300, Default = Settings.FOVSize },
+    Value = { Min = 1, Max = 1500, Default = Settings.FOVSize },
     Callback = function(v) Settings.FOVSize = v end
 })
 
@@ -592,7 +592,7 @@ MiscTab:Toggle({
 })
 
 MiscTab:Slider({
-    Title = "ขนาด Boob Physics",
+    Title = "ขนาด นม",
     Step = 0.1,
     Value = { Min = 0.5, Max = 3, Default = BoobSettings.Size },
     Callback = function(v)
