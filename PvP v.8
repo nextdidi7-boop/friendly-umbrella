@@ -250,32 +250,63 @@ local FOVCircle = _G.FOVCircle
 
 local HIGHLIGHT_CACHE = {}
 
--- ตารางกำหนดสีตามระดับความแรร์ของไอเทม
+-- กำหนดสีตามระดับความแรร์ 5 ระดับ (1.เทา, 2.ฟ้า, 3.ม่วง, 4.ทอง, 5.แดง)
 local RARITY_COLORS = {
-    ["Common"]      = Color3.fromRGB(200, 200, 200), -- สีเทา/ขาว
-    ["Uncommon"]    = Color3.fromRGB(80, 255, 120),  -- สีเขียว
-    ["Rare"]        = Color3.fromRGB(80, 160, 255),  -- สีฟ้า
-    ["Epic"]        = Color3.fromRGB(170, 80, 255),  -- สีม่วง
-    ["Legendary"]   = Color3.fromRGB(255, 180, 0),    -- สีส้ม/ทอง
-    ["Mythic"]      = Color3.fromRGB(255, 50, 80),    -- สีแดง
-    ["Secret"]      = Color3.fromRGB(0, 255, 235),   -- สีฟ้าสว่าง
-    ["Default"]     = Color3.fromRGB(255, 220, 80)   -- สีเหลืองมาตรฐาน
+    [1] = Color3.fromRGB(180, 180, 180), -- 1. สีเทา (กากที่สุด / Common)
+    [2] = Color3.fromRGB(0, 170, 255),   -- 2. สีฟ้า (Rare)
+    [3] = Color3.fromRGB(170, 0, 255),   -- 3. สีม่วง (Epic)
+    [4] = Color3.fromRGB(255, 200, 0),   -- 4. สีทอง (Legendary)
+    [5] = Color3.fromRGB(255, 30, 30),    -- 5. สีแดง (แรร์ที่สุด / Mythic)
+    
+    ["Common"]    = Color3.fromRGB(180, 180, 180),
+    ["Uncommon"]  = Color3.fromRGB(180, 180, 180),
+    ["Rare"]      = Color3.fromRGB(0, 170, 255),
+    ["Epic"]      = Color3.fromRGB(170, 0, 255),
+    ["Legendary"] = Color3.fromRGB(255, 200, 0),
+    ["Mythic"]    = Color3.fromRGB(255, 30, 30),
+    
+    ["Default"]   = Color3.fromRGB(255, 255, 255)
 }
 
--- ฟังก์ชันดึงสีความแรร์จากตัวไอเทม
+-- ฟังก์ชันดึงชื่อไอเทมที่แท้จริง
+local function GetItemName(tool)
+    if not tool then return "Unknown" end
+    
+    local nameAttr = tool:GetAttribute("ItemName") or tool:GetAttribute("DisplayName") or tool:GetAttribute("Name")
+    if nameAttr and tostring(nameAttr) ~= "" then return tostring(nameAttr) end
+    
+    local nameObj = tool:FindFirstChild("ItemName") or tool:FindFirstChild("DisplayName")
+    if nameObj and nameObj:IsA("ValueBase") and tostring(nameObj.Value) ~= "" then
+        return tostring(nameObj.Value)
+    end
+    
+    if not tonumber(tool.Name) then
+        return tool.Name
+    end
+    
+    return "Item " .. tool.Name
+end
+
+-- ฟังก์ชันดึงสีตามระดับความแรร์ของไอเทม
 local function GetItemColor(tool)
     if not tool then return RARITY_COLORS["Default"] end
     
-    local rarityVal = tool:GetAttribute("Rarity") or tool:GetAttribute("Tier")
+    local rarityVal = tool:GetAttribute("Rarity") or tool:GetAttribute("Tier") or tool:GetAttribute("RarityLevel")
     if not rarityVal then
-        local child = tool:FindFirstChild("Rarity") or tool:FindFirstChild("Tier")
+        local child = tool:FindFirstChild("Rarity") or tool:FindFirstChild("Tier") or tool:FindFirstChild("RarityLevel")
         if child and child:IsA("ValueBase") then
             rarityVal = child.Value
         end
     end
     
-    if rarityVal and RARITY_COLORS[tostring(rarityVal)] then
-        return RARITY_COLORS[tostring(rarityVal)]
+    if rarityVal then
+        local numRarity = tonumber(rarityVal)
+        if numRarity and RARITY_COLORS[numRarity] then
+            return RARITY_COLORS[numRarity]
+        end
+        if RARITY_COLORS[tostring(rarityVal)] then
+            return RARITY_COLORS[tostring(rarityVal)]
+        end
     end
     
     return RARITY_COLORS["Default"]
@@ -321,7 +352,7 @@ local function CreatePlayerESP(Player)
         Billboard.Name = "PlayerInfo"
         Billboard.Adornee = Head
         Billboard.AlwaysOnTop = true
-        Billboard.Size = UDim2.fromOffset(220, 150)
+        Billboard.Size = UDim2.fromOffset(220, 160)
         Billboard.StudsOffset = Vector3.new(0, 3.5, 0)
 
         local Container = Instance.new("Frame", Billboard)
@@ -378,7 +409,7 @@ local function CreatePlayerESP(Player)
             local ToolContainer = Instance.new("Frame", Container)
             ToolContainer.Name = "ToolContainer"
             ToolContainer.BackgroundTransparency = 1
-            ToolContainer.Size = UDim2.fromOffset(210, 80)
+            ToolContainer.Size = UDim2.fromOffset(210, 90)
 
             local ToolLayout = Instance.new("UIListLayout", ToolContainer)
             ToolLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
@@ -409,11 +440,14 @@ local function CreatePlayerESP(Player)
 
                 if #toolList > 0 then
                     for _, item in ipairs(toolList) do
+                        local realName = GetItemName(item.Tool)
+                        local itemColor = GetItemColor(item.Tool)
+
                         local Label = Instance.new("TextLabel", ToolContainer)
                         Label.BackgroundTransparency = 1
                         Label.Size = UDim2.fromOffset(210, 16)
-                        Label.Text = item.Status .. " " .. item.Tool.Name
-                        Label.TextColor3 = GetItemColor(item.Tool)
+                        Label.Text = item.Status .. " " .. realName
+                        Label.TextColor3 = itemColor
                         Label.TextStrokeTransparency = 0
                         Label.TextScaled = true
                         Label.Font = Enum.Font.GothamBold
