@@ -241,6 +241,128 @@ _G.isTeammate = isTeammate
 _G.getEquippedTool = getEquippedTool
 _G.GetClosestTarget = GetClosestTarget
 --========================================================
+-- [PART 2/4] COMBAT, AIMBOT & PHYSICS LOGIC
+--========================================================
+
+local CreatedBoobParts = {}
+local LeftMeshWeld, RightMeshWeld = nil, nil
+local BaseLeftC0 = CFrame.new(-0.42, 0.1, -0.52)
+local BaseRightC0 = CFrame.new(0.42, 0.1, -0.52)
+
+local function GetRainbow(speed)
+    local t = (tick() * (speed or 1)) % 5 / 5
+    return Color3.fromHSV(t, 1, 1)
+end
+
+local function isAlive(char)
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    return hum and hum.Health > 0
+end
+
+local function isTeammate(p)
+    if not _G.Settings.TeamCheck then return false end
+    if not LocalPlayer.Team or not p.Team then return false end
+    return p.Team == LocalPlayer.Team
+end
+
+local function getEquippedTool()
+    return LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
+end
+
+local RayParams = RaycastParams.new()
+RayParams.FilterType = Enum.RaycastFilterType.Blacklist
+RayParams.IgnoreWater = true
+
+local function isVisible(part, char)
+    RayParams.FilterDescendantsInstances = {LocalPlayer.Character, char}
+    local origin = Camera.CFrame.Position
+    local dir = part.Position - origin
+    return not Workspace:Raycast(origin, dir, RayParams)
+end
+
+local function GetClosestTarget()
+    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
+    local closest, target = _G.Settings.FOVSize, nil
+
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer and p.Character and isAlive(p.Character) and not isTeammate(p) then
+            local part = p.Character:FindFirstChild(_G.Settings.AimPart) or p.Character:FindFirstChild("Head")
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if part and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= _G.Settings.MaxDistance then
+                if isVisible(part, p.Character) then
+                    local s, on = Camera:WorldToViewportPoint(part.Position)
+                    if on then
+                        local d = (Vector2.new(s.X, s.Y) - center).Magnitude
+                        if d < closest then
+                            closest = d
+                            target = part
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return target
+end
+
+_G.DestroyBoobs = function()
+    for _, v in ipairs(CreatedBoobParts) do
+        if v and v.Parent then pcall(function() v:Destroy() end) end
+    end
+    CreatedBoobParts = {}
+    LeftMeshWeld, RightMeshWeld = nil, nil
+end
+
+_G.BuildSoftBoob = function(char)
+    _G.DestroyBoobs()
+    if not char or not char.Parent then return end
+
+    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
+    local head = char:FindFirstChild("Head")
+    if not torso then return end
+
+    local skinCol = head and head.Color or torso.Color
+    local pink1, pink2 = Color3.fromRGB(255, 130, 155), Color3.fromRGB(255, 80, 120)
+    local s = _G.BoobSettings.Size
+
+    local function createSphere(cf, size, col, parentWeld)
+        local p = Instance.new("Part")
+        p.Shape = Enum.PartType.Ball
+        p.Size = size
+        p.Color = col
+        p.Material = Enum.Material.SmoothPlastic
+        p.CanCollide = false
+        p.Massless = true
+        p.Parent = char
+
+        local w = Instance.new("Weld")
+        w.Part0 = parentWeld or torso
+        w.Part1 = p
+        w.C0 = cf
+        w.Parent = p
+
+        table.insert(CreatedBoobParts, p)
+        return p, w
+    end
+
+    local lMain, lW = createSphere(BaseLeftC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
+    local rMain, rW = createSphere(BaseRightC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
+    LeftMeshWeld, RightMeshWeld = lW, rW
+
+    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, lMain)
+    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, rMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, lMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, rMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, lMain)
+    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, rMain)
+end
+
+_G.GetRainbow = GetRainbow
+_G.isAlive = isAlive
+_G.isTeammate = isTeammate
+_G.getEquippedTool = getEquippedTool
+_G.GetClosestTarget = GetClosestTarget
+--========================================================
 -- [PART 3/4] ESP SYSTEM & UPDATER LOOPS
 --========================================================
 
@@ -250,13 +372,13 @@ local FOVCircle = _G.FOVCircle
 
 local HIGHLIGHT_CACHE = {}
 
--- กำหนดสีตามระดับความแรร์ 5 ระดับ (1.เทา, 2.ฟ้า, 3.ม่วง, 4.ทอง, 5.แดง)
+-- สีประจำระดับความแรร์ (1.เทา 2.ฟ้า 3.ม่วง 4.ทอง 5.แดง)
 local RARITY_COLORS = {
-    [1] = Color3.fromRGB(180, 180, 180), -- 1. สีเทา (กากที่สุด / Common)
-    [2] = Color3.fromRGB(0, 170, 255),   -- 2. สีฟ้า (Rare)
-    [3] = Color3.fromRGB(170, 0, 255),   -- 3. สีม่วง (Epic)
-    [4] = Color3.fromRGB(255, 200, 0),   -- 4. สีทอง (Legendary)
-    [5] = Color3.fromRGB(255, 30, 30),    -- 5. สีแดง (แรร์ที่สุด / Mythic)
+    [1] = Color3.fromRGB(180, 180, 180), -- 1. สีเทา
+    [2] = Color3.fromRGB(0, 170, 255),   -- 2. สีฟ้า
+    [3] = Color3.fromRGB(170, 0, 255),   -- 3. สีม่วง
+    [4] = Color3.fromRGB(255, 200, 0),   -- 4. สีทอง
+    [5] = Color3.fromRGB(255, 30, 30),    -- 5. สีแดง
     
     ["Common"]    = Color3.fromRGB(180, 180, 180),
     ["Uncommon"]  = Color3.fromRGB(180, 180, 180),
@@ -284,10 +406,10 @@ local function GetItemName(tool)
         return tool.Name
     end
     
-    return "Item " .. tool.Name
+    return tool.Name
 end
 
--- ฟังก์ชันดึงสีตามระดับความแรร์ของไอเทม
+-- ฟังก์ชันดึงสีตามความแรร์
 local function GetItemColor(tool)
     if not tool then return RARITY_COLORS["Default"] end
     
@@ -327,7 +449,8 @@ local function CreatePlayerESP(Player)
     if not Character or not isAlive(Character) then return end
     local Head = Character:FindFirstChild("Head")
     local Humanoid = Character:FindFirstChildOfClass("Humanoid")
-    if not Head or not Humanoid then return end
+    local RootPart = Character:FindFirstChild("HumanoidRootPart")
+    if not Head or not Humanoid or not RootPart then return end
 
     RemovePlayerESP(Player)
 
@@ -353,7 +476,7 @@ local function CreatePlayerESP(Player)
         Billboard.Adornee = Head
         Billboard.AlwaysOnTop = true
         Billboard.Size = UDim2.fromOffset(220, 160)
-        Billboard.StudsOffset = Vector3.new(0, 3.5, 0)
+        Billboard.StudsOffset = Vector3.new(0, 3, 0)
 
         local Container = Instance.new("Frame", Billboard)
         Container.BackgroundTransparency = 1
@@ -362,12 +485,13 @@ local function CreatePlayerESP(Player)
         local Layout = Instance.new("UIListLayout", Container)
         Layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
         Layout.VerticalAlignment = Enum.VerticalAlignment.Top
-        Layout.Padding = UDim.new(0, 2)
+        Layout.Padding = UDim.new(0, 1)
 
+        -- 1. แสดงชื่อผู้เล่น
         if _G.Settings.NameESP then
             local NameLabel = Instance.new("TextLabel", Container)
             NameLabel.BackgroundTransparency = 1
-            NameLabel.Size = UDim2.fromOffset(210, 22)
+            NameLabel.Size = UDim2.fromOffset(210, 18)
             NameLabel.Text = Player.DisplayName .. " (@" .. Player.Name .. ")"
             NameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
             NameLabel.TextStrokeTransparency = 0
@@ -375,36 +499,41 @@ local function CreatePlayerESP(Player)
             NameLabel.Font = Enum.Font.GothamBold
         end
 
-        if _G.Settings.HealthESP then
-            local HealthBack = Instance.new("Frame", Container)
-            HealthBack.Size = UDim2.fromOffset(140, 10)
-            HealthBack.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
-            HealthBack.BorderSizePixel = 0
-            Instance.new("UICorner", HealthBack).CornerRadius = UDim.new(1, 0)
+        -- 2. แสดงระยะห่างและเปอร์เซ็นต์เลือด [920M] [100%]
+        local InfoLabel = Instance.new("TextLabel", Container)
+        InfoLabel.BackgroundTransparency = 1
+        InfoLabel.Size = UDim2.fromOffset(210, 16)
+        InfoLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+        InfoLabel.TextStrokeTransparency = 0
+        InfoLabel.TextScaled = true
+        InfoLabel.Font = Enum.Font.GothamBold
 
-            local HealthBar = Instance.new("Frame", HealthBack)
-            HealthBar.Size = UDim2.fromScale(math.clamp(Humanoid.Health / math.max(Humanoid.MaxHealth, 1), 0, 1), 1)
-            HealthBar.BackgroundColor3 = Color3.fromRGB(50, 255, 100)
-            HealthBar.BorderSizePixel = 0
-            Instance.new("UICorner", HealthBar).CornerRadius = UDim.new(1, 0)
-
-            local HPText = Instance.new("TextLabel", Container)
-            HPText.BackgroundTransparency = 1
-            HPText.Size = UDim2.fromOffset(210, 18)
-            HPText.Text = math.floor(Humanoid.Health) .. " / " .. math.floor(Humanoid.MaxHealth) .. " HP"
-            HPText.TextColor3 = Color3.fromRGB(255, 255, 255)
-            HPText.TextStrokeTransparency = 0
-            HPText.TextScaled = true
-            HPText.Font = Enum.Font.Gotham
-
-            Humanoid.HealthChanged:Connect(function(Health)
-                if not HealthBar.Parent then return end
-                local MaxHealth = math.max(Humanoid.MaxHealth, 1)
-                HealthBar.Size = UDim2.fromScale(math.clamp(Health / MaxHealth, 0, 1), 1)
-                HPText.Text = math.floor(Health) .. " / " .. math.floor(MaxHealth) .. " HP"
-            end)
+        local function UpdateInfo()
+            if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return end
+            local myPos = LocalPlayer.Character.HumanoidRootPart.Position
+            local dist = math.floor((RootPart.Position - myPos).Magnitude)
+            local hpPercent = math.floor((Humanoid.Health / math.max(Humanoid.MaxHealth, 1)) * 100)
+            
+            if _G.Settings.HealthESP then
+                InfoLabel.Text = "[" .. dist .. "M] [" .. hpPercent .. "%]"
+            else
+                InfoLabel.Text = "[" .. dist .. "M]"
+            end
         end
 
+        UpdateInfo()
+        
+        -- อัปเดตระยะและ HP ต่อเนื่อง
+        local conn
+        conn = RunService.RenderStepped:Connect(function()
+            if not Billboard or not Billboard.Parent then
+                if conn then conn:Disconnect() end
+                return
+            end
+            UpdateInfo()
+        end)
+
+        -- 3. แสดงชื่อไอเทมเรียงลงมาตามสีความแรร์
         if _G.Settings.ToolESP then
             local ToolContainer = Instance.new("Frame", Container)
             ToolContainer.Name = "ToolContainer"
@@ -423,44 +552,36 @@ local function CreatePlayerESP(Player)
 
                 local toolList = {}
 
+                -- ดึงไอเทมที่ถือ
                 for _, obj in ipairs(Character:GetChildren()) do
                     if obj:IsA("Tool") then
-                        table.insert(toolList, { Tool = obj, Status = "[ถือ]" })
+                        table.insert(toolList, obj)
                     end
                 end
 
+                -- ดึงไอเทมในกระเป๋า
                 local backpack = Player:FindFirstChildOfClass("Backpack")
                 if backpack then
                     for _, obj in ipairs(backpack:GetChildren()) do
                         if obj:IsA("Tool") then
-                            table.insert(toolList, { Tool = obj, Status = "[สวมใส่อยู่]" })
+                            table.insert(toolList, obj)
                         end
                     end
                 end
 
-                if #toolList > 0 then
-                    for _, item in ipairs(toolList) do
-                        local realName = GetItemName(item.Tool)
-                        local itemColor = GetItemColor(item.Tool)
+                -- สร้างป้ายชื่อไอเทมแสดงผล (โชว์เฉพาะชื่อ ไม่ต้องมีข้อความนำหน้า)
+                for _, toolObj in ipairs(toolList) do
+                    local realName = GetItemName(toolObj)
+                    local itemColor = GetItemColor(toolObj)
 
-                        local Label = Instance.new("TextLabel", ToolContainer)
-                        Label.BackgroundTransparency = 1
-                        Label.Size = UDim2.fromOffset(210, 16)
-                        Label.Text = item.Status .. " " .. realName
-                        Label.TextColor3 = itemColor
-                        Label.TextStrokeTransparency = 0
-                        Label.TextScaled = true
-                        Label.Font = Enum.Font.GothamBold
-                    end
-                else
                     local Label = Instance.new("TextLabel", ToolContainer)
                     Label.BackgroundTransparency = 1
-                    Label.Size = UDim2.fromOffset(210, 16)
-                    Label.Text = "ไม่มีไอเทม"
-                    Label.TextColor3 = Color3.fromRGB(150, 150, 150)
+                    Label.Size = UDim2.fromOffset(210, 15)
+                    Label.Text = realName
+                    Label.TextColor3 = itemColor
                     Label.TextStrokeTransparency = 0
                     Label.TextScaled = true
-                    Label.Font = Enum.Font.Gotham
+                    Label.Font = Enum.Font.GothamBold
                 end
             end
 
