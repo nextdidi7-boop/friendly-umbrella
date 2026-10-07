@@ -31,9 +31,11 @@ _G.Settings = {
     FOVSize = 100,
     RainbowFOV = false,
     TeamCheck = false,
+    SafezoneCheck = true, -- เปิดเช็คเซฟโซนไม่ให้ล็อค
     MaxDistance = 600,
 
     AutoShootOnTarget = false,
+    ItemAuraEnabled = false, -- ระบบดูดของ
 
     WalkSpeedEnabled = false,
     WalkSpeedVal = 16,
@@ -46,6 +48,9 @@ _G.Settings = {
     HighlightESP = false,
     RainbowESP = false
 }
+
+-- รายชื่อผู้เล่นที่เป็นพันธมิตร (Whitelist เพื่อน/ไม่ล็อค)
+_G.FriendlyPlayers = _G.FriendlyPlayers or {}
 
 _G.BoobSettings = {
     Enabled = false,
@@ -61,7 +66,8 @@ local function SaveConfig()
     pcall(function()
         local dataToSave = {
             Settings = _G.Settings,
-            BoobSettings = _G.BoobSettings
+            BoobSettings = _G.BoobSettings,
+            FriendlyPlayers = _G.FriendlyPlayers
         }
         writefile(ConfigFileName, HttpService:JSONEncode(dataToSave))
     end)
@@ -83,11 +89,13 @@ local function LoadConfig()
                     _G.BoobSettings[k] = v
                 end
             end
+            if decoded.FriendlyPlayers then
+                _G.FriendlyPlayers = decoded.FriendlyPlayers
+            end
         end
     end)
 end
 
--- โหลดค่าเดิมขึ้นมาใช้งาน
 LoadConfig()
 _G.SaveConfig = SaveConfig
 
@@ -143,6 +151,32 @@ local function isTeammate(p)
     return p.Team == LocalPlayer.Team
 end
 
+-- ตรวจสอบว่าเป็นผู้เล่นพันธมิตรที่เลือกไว้หรือไม่
+local function isFriendly(p)
+    if _G.FriendlyPlayers[p.Name] or _G.FriendlyPlayers[tostring(p.UserId)] then
+        return true
+    end
+    return false
+end
+
+-- ตรวจสอบว่าอยู่ในเซฟโซนหรือไม่ (เช็คจาก Attribute หรือ Folder Safezone ในแมพ)
+local function isInSafezone(char)
+    if not char then return false end
+    if char:GetAttribute("Safezone") or char:GetAttribute("InSafezone") then
+        return true
+    end
+    -- เช็คเผื่อแมพใช้เงื่อนไขอื่น เช่น Touching Safezone Part
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if root then
+        for _, part in ipairs(Workspace:GetPartsInPart(root)) do
+            if part.Name:lower():find("safe") or part.Parent.Name:lower():find("safe") then
+                return true
+            end
+        end
+    end
+    return false
+end
+
 local function getEquippedTool()
     return LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
 end
@@ -164,16 +198,19 @@ local function GetClosestTarget()
 
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character and isAlive(p.Character) and not isTeammate(p) then
-            local part = p.Character:FindFirstChild(_G.Settings.AimPart) or p.Character:FindFirstChild("Head")
-            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
-            if part and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= _G.Settings.MaxDistance then
-                if isVisible(part, p.Character) then
-                    local s, on = Camera:WorldToViewportPoint(part.Position)
-                    if on then
-                        local d = (Vector2.new(s.X, s.Y) - center).Magnitude
-                        if d < closest then
-                            closest = d
-                            target = part
+            -- ถ้าอยู่ในพันธมิตร หรืออยู่ในเซฟโซน จะข้ามไม่ล็อคเป้า
+            if not isFriendly(p) and not (_G.Settings.SafezoneCheck and isInSafezone(p.Character)) then
+                local part = p.Character:FindFirstChild(_G.Settings.AimPart) or p.Character:FindFirstChild("Head")
+                local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+                if part and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= _G.Settings.MaxDistance then
+                    if isVisible(part, p.Character) then
+                        local s, on = Camera:WorldToViewportPoint(part.Position)
+                        if on then
+                            local d = (Vector2.new(s.X, s.Y) - center).Magnitude
+                            if d < closest then
+                                closest = d
+                                target = part
+                            end
                         end
                     end
                 end
@@ -182,6 +219,23 @@ local function GetClosestTarget()
     end
     return target
 end
+
+-- ระบบดูดของอัตโนมัติ (Item Aura)
+RunService.Heartbeat:Connect(function()
+    if _G.Settings.ItemAuraEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        local hrp = LocalPlayer.Character.HumanoidRootPart
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj:IsA("TouchTransmitter") and obj.Parent and obj.Parent:IsA("BasePart") then
+                local part = obj.Parent
+                -- เช็คว่าเป็นไอเทมที่ดรอปอยู่บนพื้น
+                if (part.Position - hrp.Position).Magnitude <= 40 then
+                    firetouchinterest(hrp, part, 0)
+                    firetouchinterest(hrp, part, 1)
+                end
+            end
+        end
+    end
+end)
 
 _G.DestroyBoobs = function()
     for _, v in ipairs(CreatedBoobParts) do
@@ -238,128 +292,7 @@ end
 _G.GetRainbow = GetRainbow
 _G.isAlive = isAlive
 _G.isTeammate = isTeammate
-_G.getEquippedTool = getEquippedTool
-_G.GetClosestTarget = GetClosestTarget
---========================================================
--- [PART 2/4] COMBAT, AIMBOT & PHYSICS LOGIC
---========================================================
-
-local CreatedBoobParts = {}
-local LeftMeshWeld, RightMeshWeld = nil, nil
-local BaseLeftC0 = CFrame.new(-0.42, 0.1, -0.52)
-local BaseRightC0 = CFrame.new(0.42, 0.1, -0.52)
-
-local function GetRainbow(speed)
-    local t = (tick() * (speed or 1)) % 5 / 5
-    return Color3.fromHSV(t, 1, 1)
-end
-
-local function isAlive(char)
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    return hum and hum.Health > 0
-end
-
-local function isTeammate(p)
-    if not _G.Settings.TeamCheck then return false end
-    if not LocalPlayer.Team or not p.Team then return false end
-    return p.Team == LocalPlayer.Team
-end
-
-local function getEquippedTool()
-    return LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
-end
-
-local RayParams = RaycastParams.new()
-RayParams.FilterType = Enum.RaycastFilterType.Blacklist
-RayParams.IgnoreWater = true
-
-local function isVisible(part, char)
-    RayParams.FilterDescendantsInstances = {LocalPlayer.Character, char}
-    local origin = Camera.CFrame.Position
-    local dir = part.Position - origin
-    return not Workspace:Raycast(origin, dir, RayParams)
-end
-
-local function GetClosestTarget()
-    local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-    local closest, target = _G.Settings.FOVSize, nil
-
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character and isAlive(p.Character) and not isTeammate(p) then
-            local part = p.Character:FindFirstChild(_G.Settings.AimPart) or p.Character:FindFirstChild("Head")
-            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
-            if part and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= _G.Settings.MaxDistance then
-                if isVisible(part, p.Character) then
-                    local s, on = Camera:WorldToViewportPoint(part.Position)
-                    if on then
-                        local d = (Vector2.new(s.X, s.Y) - center).Magnitude
-                        if d < closest then
-                            closest = d
-                            target = part
-                        end
-                    end
-                end
-            end
-        end
-    end
-    return target
-end
-
-_G.DestroyBoobs = function()
-    for _, v in ipairs(CreatedBoobParts) do
-        if v and v.Parent then pcall(function() v:Destroy() end) end
-    end
-    CreatedBoobParts = {}
-    LeftMeshWeld, RightMeshWeld = nil, nil
-end
-
-_G.BuildSoftBoob = function(char)
-    _G.DestroyBoobs()
-    if not char or not char.Parent then return end
-
-    local torso = char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
-    local head = char:FindFirstChild("Head")
-    if not torso then return end
-
-    local skinCol = head and head.Color or torso.Color
-    local pink1, pink2 = Color3.fromRGB(255, 130, 155), Color3.fromRGB(255, 80, 120)
-    local s = _G.BoobSettings.Size
-
-    local function createSphere(cf, size, col, parentWeld)
-        local p = Instance.new("Part")
-        p.Shape = Enum.PartType.Ball
-        p.Size = size
-        p.Color = col
-        p.Material = Enum.Material.SmoothPlastic
-        p.CanCollide = false
-        p.Massless = true
-        p.Parent = char
-
-        local w = Instance.new("Weld")
-        w.Part0 = parentWeld or torso
-        w.Part1 = p
-        w.C0 = cf
-        w.Parent = p
-
-        table.insert(CreatedBoobParts, p)
-        return p, w
-    end
-
-    local lMain, lW = createSphere(BaseLeftC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
-    local rMain, rW = createSphere(BaseRightC0, Vector3.new(1.05 * s, 1.25 * s, 1.15 * s), skinCol)
-    LeftMeshWeld, RightMeshWeld = lW, rW
-
-    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, lMain)
-    createSphere(CFrame.new(0, -0.18 * s, 0.08 * s), Vector3.new(0.95 * s, 0.95 * s, 1.05 * s), skinCol, rMain)
-    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, lMain)
-    createSphere(CFrame.new(0, -0.02 * s, -0.55 * s), Vector3.new(0.38 * s, 0.38 * s, 0.08 * s), pink1, rMain)
-    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, lMain)
-    createSphere(CFrame.new(0, -0.02 * s, -0.58 * s), Vector3.new(0.15 * s, 0.15 * s, 0.1 * s), pink2, rMain)
-end
-
-_G.GetRainbow = GetRainbow
-_G.isAlive = isAlive
-_G.isTeammate = isTeammate
+_G.isFriendly = isFriendly
 _G.getEquippedTool = getEquippedTool
 _G.GetClosestTarget = GetClosestTarget
 --========================================================
@@ -372,13 +305,13 @@ local FOVCircle = _G.FOVCircle
 
 local HIGHLIGHT_CACHE = {}
 
--- สีประจำระดับความแรร์ (1.เทา 2.ฟ้า 3.ม่วง 4.ทอง 5.แดง)
+-- สีระดับความแรร์ 5 ระดับ (1.เทา 2.ฟ้า 3.ม่วง 4.ทอง 5.แดง)
 local RARITY_COLORS = {
-    [1] = Color3.fromRGB(180, 180, 180), -- 1. สีเทา
-    [2] = Color3.fromRGB(0, 170, 255),   -- 2. สีฟ้า
-    [3] = Color3.fromRGB(170, 0, 255),   -- 3. สีม่วง
-    [4] = Color3.fromRGB(255, 200, 0),   -- 4. สีทอง
-    [5] = Color3.fromRGB(255, 30, 30),    -- 5. สีแดง
+    [1] = Color3.fromRGB(180, 180, 180),
+    [2] = Color3.fromRGB(0, 170, 255),
+    [3] = Color3.fromRGB(170, 0, 255),
+    [4] = Color3.fromRGB(255, 200, 0),
+    [5] = Color3.fromRGB(255, 30, 30),
     
     ["Common"]    = Color3.fromRGB(180, 180, 180),
     ["Uncommon"]  = Color3.fromRGB(180, 180, 180),
@@ -390,26 +323,33 @@ local RARITY_COLORS = {
     ["Default"]   = Color3.fromRGB(255, 255, 255)
 }
 
--- ฟังก์ชันดึงชื่อไอเทมที่แท้จริง
+-- ฟังก์ชันดึงชื่อไอเทมจริง (แก้ปัญหาแสดงผลเป็นตัวเลข ID)
 local function GetItemName(tool)
     if not tool then return "Unknown" end
     
+    -- เช็ค Attribute หรือค่าภายใน
     local nameAttr = tool:GetAttribute("ItemName") or tool:GetAttribute("DisplayName") or tool:GetAttribute("Name")
-    if nameAttr and tostring(nameAttr) ~= "" then return tostring(nameAttr) end
+    if nameAttr and tostring(nameAttr) ~= "" and tostring(nameAttr) ~= tostring(tool.Name) then 
+        return tostring(nameAttr) 
+    end
     
-    local nameObj = tool:FindFirstChild("ItemName") or tool:FindFirstChild("DisplayName")
+    local nameObj = tool:FindFirstChild("ItemName") or tool:FindFirstChild("DisplayName") or tool:FindFirstChild("Title")
     if nameObj and nameObj:IsA("ValueBase") and tostring(nameObj.Value) ~= "" then
         return tostring(nameObj.Value)
     end
     
-    if not tonumber(tool.Name) then
-        return tool.Name
+    -- ถ้าชื่อหลักเป็นตัวเลข ให้พยายามหา StringValue อื่นๆ ข้างใน
+    if tonumber(tool.Name) then
+        for _, child in ipairs(tool:GetChildren()) do
+            if child:IsA("StringValue") and child.Name ~= "Rarity" and child.Name ~= "Tier" then
+                return child.Value
+            end
+        end
     end
     
     return tool.Name
 end
 
--- ฟังก์ชันดึงสีตามความแรร์
 local function GetItemColor(tool)
     if not tool then return RARITY_COLORS["Default"] end
     
@@ -447,10 +387,9 @@ local function CreatePlayerESP(Player)
     if Player == LocalPlayer then return end
     local Character = Player.Character
     if not Character or not isAlive(Character) then return end
-    local Head = Character:FindFirstChild("Head")
+    local RootPart = Character:FindFirstChild("HumanoidRootPart") or Character:FindFirstChild("Torso")
     local Humanoid = Character:FindFirstChildOfClass("Humanoid")
-    local RootPart = Character:FindFirstChild("HumanoidRootPart")
-    if not Head or not Humanoid or not RootPart then return end
+    if not RootPart or not Humanoid then return end
 
     RemovePlayerESP(Player)
 
@@ -473,10 +412,10 @@ local function CreatePlayerESP(Player)
     if _G.Settings.NameESP or _G.Settings.HealthESP or _G.Settings.ToolESP then
         local Billboard = Instance.new("BillboardGui", Folder)
         Billboard.Name = "PlayerInfo"
-        Billboard.Adornee = Head
+        Billboard.Adornee = RootPart -- ย้ายมาติดที่กลางตัว
         Billboard.AlwaysOnTop = true
         Billboard.Size = UDim2.fromOffset(220, 160)
-        Billboard.StudsOffset = Vector3.new(0, 3, 0)
+        Billboard.StudsOffset = Vector3.new(0, 0.5, 0) -- ปรับให้อยู่บริเวณกลางลำตัว
 
         local Container = Instance.new("Frame", Billboard)
         Container.BackgroundTransparency = 1
@@ -487,19 +426,27 @@ local function CreatePlayerESP(Player)
         Layout.VerticalAlignment = Enum.VerticalAlignment.Top
         Layout.Padding = UDim.new(0, 1)
 
-        -- 1. แสดงชื่อผู้เล่น
+        -- 1. แสดงชื่อผู้เล่น (ถ้าเป็นพันธมิตรจะเปลี่ยนเป็นสีเขียว)
         if _G.Settings.NameESP then
             local NameLabel = Instance.new("TextLabel", Container)
             NameLabel.BackgroundTransparency = 1
             NameLabel.Size = UDim2.fromOffset(210, 18)
             NameLabel.Text = Player.DisplayName .. " (@" .. Player.Name .. ")"
-            NameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+            NameLabel.TextColor3 = isFriendly(Player) and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 255, 255)
             NameLabel.TextStrokeTransparency = 0
             NameLabel.TextScaled = true
             NameLabel.Font = Enum.Font.GothamBold
+
+            -- อัปเดตสีชื่ออัตโนมัติหากมีการเปลี่ยนสถานะพันธมิตร
+            task.spawn(function()
+                while NameLabel and NameLabel.Parent do
+                    NameLabel.TextColor3 = isFriendly(Player) and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 255, 255)
+                    task.wait(1)
+                end
+            end)
         end
 
-        -- 2. แสดงระยะห่างและเปอร์เซ็นต์เลือด [920M] [100%]
+        -- 2. แสดงระยะห่างและเปอร์เซ็นต์เลือด
         local InfoLabel = Instance.new("TextLabel", Container)
         InfoLabel.BackgroundTransparency = 1
         InfoLabel.Size = UDim2.fromOffset(210, 16)
@@ -523,7 +470,6 @@ local function CreatePlayerESP(Player)
 
         UpdateInfo()
         
-        -- อัปเดตระยะและ HP ต่อเนื่อง
         local conn
         conn = RunService.RenderStepped:Connect(function()
             if not Billboard or not Billboard.Parent then
@@ -552,14 +498,12 @@ local function CreatePlayerESP(Player)
 
                 local toolList = {}
 
-                -- ดึงไอเทมที่ถือ
                 for _, obj in ipairs(Character:GetChildren()) do
                     if obj:IsA("Tool") then
                         table.insert(toolList, obj)
                     end
                 end
 
-                -- ดึงไอเทมในกระเป๋า
                 local backpack = Player:FindFirstChildOfClass("Backpack")
                 if backpack then
                     for _, obj in ipairs(backpack:GetChildren()) do
@@ -569,7 +513,6 @@ local function CreatePlayerESP(Player)
                     end
                 end
 
-                -- สร้างป้ายชื่อไอเทมแสดงผล (โชว์เฉพาะชื่อ ไม่ต้องมีข้อความนำหน้า)
                 for _, toolObj in ipairs(toolList) do
                     local realName = GetItemName(toolObj)
                     local itemColor = GetItemColor(toolObj)
@@ -764,13 +707,43 @@ CombatTab:Toggle({
     Callback = function(v) Settings.TeamCheck = v; SaveConfig() end
 })
 
--- TAB: GUN MODS
-local GunTab = Window:Tab({ Title = "ปรับแต่งปืน", Icon = "zap" })
+CombatTab:Toggle({
+    Title = "ไม่ล็อคเป้าเมื่อผู้เล่นอยู่ในเซฟ (Safezone Check)",
+    Value = Settings.SafezoneCheck,
+    Callback = function(v) Settings.SafezoneCheck = v; SaveConfig() end
+})
+
+-- ระบบเลือกผู้เล่นเป็นพันธมิตร (ไม่ล็อค + ชื่อสีเขียว)
+local playerNames = {}
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= LocalPlayer then table.insert(playerNames, p.Name) end
+end
+
+CombatTab:Dropdown({
+    Title = "เลือกผู้เล่นเป็นพันธมิตร (Whitelist)",
+    Values = playerNames,
+    Callback = function(v)
+        if v then
+            _G.FriendlyPlayers[v] = not _G.FriendlyPlayers[v]
+            SaveConfig()
+            _G.RefreshPlayerESP()
+        end
+    end
+})
+
+-- TAB: GUN MODS & AUTO LOOT
+local GunTab = Window:Tab({ Title = "ปรับแต่งปืน & ฟาร์ม", Icon = "zap" })
 
 GunTab:Toggle({
     Title = "ยิงอัตโนมัติเมื่อเล็งผู้เล่น (Auto Fire On Target)",
     Value = Settings.AutoShootOnTarget,
     Callback = function(v) Settings.AutoShootOnTarget = v; SaveConfig() end
+})
+
+GunTab:Toggle({
+    Title = "ระบบดูดของอัตโนมัติ (Item Aura)",
+    Value = Settings.ItemAuraEnabled,
+    Callback = function(v) Settings.ItemAuraEnabled = v; SaveConfig() end
 })
 
 -- TAB: FOV
@@ -833,7 +806,7 @@ VisualTab:Toggle({
 })
 
 VisualTab:Toggle({
-    Title = "มองของที่ผู้เล่นถือ",
+    Title = "มองของที่ผู้เล่นถือ/สวมใส่",
     Value = Settings.ToolESP,
     Callback = function(v) Settings.ToolESP = v; _G.RefreshPlayerESP(); SaveConfig() end
 })
