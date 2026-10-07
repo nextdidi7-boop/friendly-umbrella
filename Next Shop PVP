@@ -162,8 +162,8 @@ local function getClosestTarget()
             end
         end
     end
-    return aDend
-
+    return aD
+end
 local function predictPosition(aD,aE)
     if not aD then return Vector3.zero end
     local aF=(getPing and getPing()) or (game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()/1000)
@@ -326,7 +326,8 @@ end
 local function getActiveTool()
     local aE=r and r.Character
     if aE then
-        for aF,aG in ipairs(aE:GetChildren()) do            if pcall(function() return aG:IsA("Tool") end) and aG:IsA("Tool") then return aG end
+        for aF,aG in ipairs(aE:GetChildren()) do
+            if pcall(function() return aG:IsA("Tool") end) and aG:IsA("Tool") then return aG end
         end
     end
     local aF=r and r:FindFirstChild("Backpack")
@@ -337,7 +338,6 @@ local function getActiveTool()
     end
     return nil
 end
-
 local function isMeleeTool(aE)
     if not aE then return false end
     if aE.Name=="Fists" then return true end
@@ -490,9 +490,9 @@ local function createBillboardForPlayer(aG)
             local aQ=Instance.new("UIStroke",aP)
             aQ.Color=at[aO.Rarity] or Color3.new(1,1,1); aQ.Thickness=2
         end
-    end    av[aG]=aJ
+    end
+    av[aG]=aJ
 end
-
 local function setFinishPrompt(aG)
     if aG and aG:IsA("ProximityPrompt") then aG.HoldDuration=ae; aG.MaxActivationDistance=20 end
 end
@@ -652,9 +652,9 @@ local function loadESP()
         end
     end)
 end
-
 if not z then
-    J=Drawing.new("Circle")    J.Color=Color3.fromRGB(255,255,255); J.Thickness=1.4; J.NumSides=64; J.Filled=false; J.Transparency=0.3; J.Radius=H; J.Visible=false
+    J=Drawing.new("Circle")
+    J.Color=Color3.fromRGB(255,255,255); J.Thickness=1.4; J.NumSides=64; J.Filled=false; J.Transparency=0.3; J.Radius=H; J.Visible=false
 else
     local aG=Instance.new("ScreenGui")
     aG.Name="MobileFOV"; aG.Parent=r:WaitForChild("PlayerGui")
@@ -788,7 +788,6 @@ if E and E.FireServer then
         end)
     end)
 end
-
 b.RenderStepped:Connect(function()
     pcall(function()
         if G then I=getClosestTarget() end
@@ -818,7 +817,8 @@ b.RenderStepped:Connect(function()
                         for aW=1,4 do
                             _G.TracerESP[aW]=Drawing.new("Line")
                             _G.TracerESP[aW].Color=Color3.fromRGB(255,255,255)
-                            _G.TracerESP[aW].Thickness=1.2                            _G.TracerESP[aW].Visible=true
+                            _G.TracerESP[aW].Thickness=1.2
+                            _G.TracerESP[aW].Visible=true
                         end
                     end
                     local aW=y:WorldToViewportPoint(aQ.Position+Vector3.new(0,0.5,0))
@@ -1060,7 +1060,7 @@ aS_tab:Slider({Title="Recoil",Step=0.1,Value={Min=0,Max=10,Default=0},Callback=f
 aS_tab:Slider({Title="Reload Time",Step=0.1,Value={Min=0.1,Max=10,Default=0.1},Callback=function(aU) ai().ReloadValue=aU end})
 aS_tab:Toggle({Title="Automatic",Icon="check",Type="Checkbox",Value=false,Callback=function(aU)
     ai().automatic=aU; ai().GunModsAutoApply=aU
-    if aU and A then A:Notify({Title="โ… Auto Modify",Duration=2}) end
+    if aU and A then A:Notify({Title="✅ Auto Modify",Duration=2}) end
 end})
 
 aS_tab:Section({Title="COMBAT"})
@@ -1116,7 +1116,7 @@ local aX=aW_tab:Toggle({Title="Inventory Viewer",Default=false,Callback=function
     if aX then
         for aY,aZ in ipairs(a:GetPlayers()) do if aZ~=r and aZ.Character then createBillboardForPlayer(aZ) end end
         ax=b.Heartbeat:Connect(function() for aY,aZ in ipairs(a:GetPlayers()) do if aZ~=r and aZ.Character then createBillboardForPlayer(aZ) end end end)
-        if A then A:Notify({Title="โ… ESP Items Enabled",Duration=3}) end
+        if A then A:Notify({Title="✅ ESP Items Enabled",Duration=3}) end
     else
         if ax then ax:Disconnect(); ax=nil end
         for aY,aZ in pairs(av) do aZ:Destroy() end
@@ -1136,7 +1136,6 @@ local a0=aW_tab:Toggle({Title="Highlight",Default=false,Callback=function(a0)
     for a1,a2 in pairs(game.Players:GetPlayers()) do updateHighlight(a2) end
 end})
 D:Register("HighlightESP",a0)
-
 function updateHighlight(a1)
     if a1==game.Players.LocalPlayer then return end
     if not a1.Character then return end
@@ -1146,7 +1145,8 @@ function updateHighlight(a1)
     if highlightEnabled then
         local a3=Instance.new("Highlight")
         a3.Name="PlayerHighlight"; a3.Adornee=a1.Character
-        a3.FillColor=Color3.fromRGB(0,170,255); a3.OutlineColor=Color3.fromRGB(0,170,255)        a3.Parent=workspace; aB[a1]=a3
+        a3.FillColor=Color3.fromRGB(0,170,255); a3.OutlineColor=Color3.fromRGB(0,170,255)
+        a3.Parent=workspace; aB[a1]=a3
     end
 end
 
@@ -1193,7 +1193,7 @@ local a6=a1_tab:Toggle({Title="Infinite Stamina",Default=false,Callback=function
                     end
                     pcall(function() a5.send("set_sprinting_1",false) end)
                 end)
-                if A then A:Notify({Title="โ… INF STAMINA",Duration=3}) end
+                if A then A:Notify({Title="✅ INF STAMINA",Duration=3}) end
             else as=false; AutoSprintToggle:Set(false) end
         else as=false; AutoSprintToggle:Set(false) end
     else
@@ -1204,7 +1204,7 @@ local a6=a1_tab:Toggle({Title="Infinite Stamina",Default=false,Callback=function
             local a9=a8.consume_stamina; local ba=getupvalue(a9,2).sprint_bar
             if ba and ai().OriginalSprintUpdate then ba.update=ai().OriginalSprintUpdate; ai().OriginalSprintUpdate=nil end
         end
-        if A then A:Notify({Title="โ Auto Sprint Disabled",Duration=3}) end
+        if A then A:Notify({Title="❌ Auto Sprint Disabled",Duration=3}) end
     end
 end})
 D:Register("AutoSprint",a6)
@@ -1213,7 +1213,7 @@ local a7=a1_tab:Toggle({Title="Anti Lock",Default=false,Callback=function(a7) ai
 D:Register("AntiLock",a7)
 local a8=a1_tab:Toggle({Title="Anti Kill",Default=false,Callback=function(a8)
     enabled=a8
-    if a8 then if A then A:Notify({Title="โ… Anti Kill Enabled",Duration=3}) end
+    if a8 then if A then A:Notify({Title="✅ Anti Kill Enabled",Duration=3}) end
     else if A then A:Notify({Title=" Anti Kill Disabled",Duration=3}) end end
 end})
 D:Register("AntiKill",a8)
@@ -1317,8 +1317,8 @@ bh.Anchored=true; bh.CanCollide=false; bh.Transparency=1
 
 local bi=bf_tab:Toggle({Title="Auto Finnish",Default=false,Callback=function(bi)
     ad=bi
-    if bi then applyToAll(); if A then A:Notify({Title="โ… Auto Finish Enabled",Duration=3}) end
-    else if A then A:Notify({Title="โ Auto Disabled",Duration=3}) end end
+    if bi then applyToAll(); if A then A:Notify({Title="✅ Auto Finish Enabled",Duration=3}) end
+    else if A then A:Notify({Title="❌ Auto Disabled",Duration=3}) end end
 end})
 D:Register("AutoFinnish",bi)
 
@@ -1474,10 +1474,10 @@ local function cleanupItemDrawings()
             if by.name then pcall(function() by.name:Remove() end) end
             if by.amount then pcall(function() by.amount:Remove() end) end
             if by.highlight then pcall(function() by.highlight:Destroy() end) end
-            w[bx]=nil        end
+            w[bx]=nil
+        end
     end
 end
-
 b.RenderStepped:Connect(function()
     cleanupItemDrawings()
     if not x then return end
@@ -1599,11 +1599,11 @@ mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20); mainFrame.BorderSizePix
 local corner = Instance.new("UICorner"); corner.CornerRadius = UDim.new(0, 10); corner.Parent = mainFrame
 local stroke = Instance.new("UIStroke"); stroke.Color = Color3.fromRGB(220, 20, 60); stroke.Thickness = 2; stroke.Parent = mainFrame
 local button = Instance.new("TextButton"); button.Name = "SpinButton"; button.Size = UDim2.new(0, 100, 0, 40); button.Position = UDim2.new(0, 5, 0, 5)
-button.BackgroundColor3 = Color3.fromRGB(25, 25, 35); button.TextColor3 = Color3.fromRGB(200, 200, 220); button.TextSize = 13; button.Font = Enum.Font.GothamBold; button.Text = "๐” OFF"; button.BorderSizePixel = 0; button.Parent = mainFrame
+button.BackgroundColor3 = Color3.fromRGB(25, 25, 35); button.TextColor3 = Color3.fromRGB(200, 200, 220); button.TextSize = 13; button.Font = Enum.Font.GothamBold; button.Text = "🔄 OFF"; button.BorderSizePixel = 0; button.Parent = mainFrame
 local buttonCorner = Instance.new("UICorner"); buttonCorner.CornerRadius = UDim.new(0, 7); buttonCorner.Parent = button
 local buttonStroke = Instance.new("UIStroke"); buttonStroke.Color = Color3.fromRGB(220, 20, 60); buttonStroke.Thickness = 1.5; buttonStroke.Parent = button
 local closeButton = Instance.new("TextButton"); closeButton.Name = "CloseButton"; closeButton.Size = UDim2.new(0, 30, 0, 40); closeButton.Position = UDim2.new(0, 110, 0, 5)
-closeButton.BackgroundColor3 = Color3.fromRGB(180, 20, 20); closeButton.TextColor3 = Color3.fromRGB(255, 255, 255); closeButton.TextSize = 16; closeButton.Font = Enum.Font.GothamBold; closeButton.Text = "ร—"; closeButton.BorderSizePixel = 0; closeButton.Parent = mainFrame
+closeButton.BackgroundColor3 = Color3.fromRGB(180, 20, 20); closeButton.TextColor3 = Color3.fromRGB(255, 255, 255); closeButton.TextSize = 16; closeButton.Font = Enum.Font.GothamBold; closeButton.Text = "×"; closeButton.BorderSizePixel = 0; closeButton.Parent = mainFrame
 local closeCorner = Instance.new("UICorner"); closeCorner.CornerRadius = UDim.new(0, 6); closeCorner.Parent = closeButton
 local closeStroke = Instance.new("UIStroke"); closeStroke.Color = Color3.fromRGB(255, 100, 100); closeStroke.Thickness = 1.5; closeStroke.Parent = closeButton
 
@@ -1626,17 +1626,17 @@ closeButton.MouseLeave:Connect(function() closeButton.BackgroundColor3 = Color3.
 button.MouseButton1Click:Connect(function()
     isSpinning = not isSpinning
     if isSpinning then
-        button.BackgroundColor3 = Color3.fromRGB(30, 80, 30); button.TextColor3 = Color3.fromRGB(100, 255, 100); button.Text = "โ“ ON"
+        button.BackgroundColor3 = Color3.fromRGB(30, 80, 30); button.TextColor3 = Color3.fromRGB(100, 255, 100); button.Text = "✓ ON"
         task.spawn(spinCharacter)
     else
-        button.BackgroundColor3 = Color3.fromRGB(25, 25, 35); button.TextColor3 = Color3.fromRGB(220, 220, 220); button.Text = "๐” OFF"
+        button.BackgroundColor3 = Color3.fromRGB(25, 25, 35); button.TextColor3 = Color3.fromRGB(220, 220, 220); button.Text = "🔄 OFF"
     end
 end)
 
 closeButton.MouseButton1Click:Connect(function() screenGui:Destroy() end)
 player.CharacterAdded:Connect(function(newCharacter)
     isSpinning = false; button.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-    button.TextColor3 = Color3.fromRGB(220, 220, 220); button.Text = "๐” OFF"
+    button.TextColor3 = Color3.fromRGB(220, 220, 220); button.Text = "🔄 OFF"
 end)
 
-print("โ… next shop[PVP] Loaded Successfully! All Original Features & Config System Active.")
+print("✅ next shop[PVP] Loaded Successfully! All Original Features & Config System Active.")
