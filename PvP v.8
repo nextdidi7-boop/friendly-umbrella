@@ -17,6 +17,7 @@ local UserInputService = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
+local CoreGui = game:GetService("CoreGui")
 
 local Camera = Workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
@@ -31,11 +32,20 @@ _G.Settings = {
     FOVSize = 100,
     RainbowFOV = false,
     TeamCheck = false,
-    SafezoneCheck = true, -- เปิดเช็คเซฟโซนไม่ให้ล็อค
+    SafezoneCheck = true,
     MaxDistance = 600,
 
     AutoShootOnTarget = false,
-    ItemAuraEnabled = false, -- ระบบดูดของ
+    ItemAuraEnabled = false,
+    
+    FriendlyEnabled = false, -- เปิด/ปิด ระบบพันธมิตร
+    FriendlyNameInput = "",   -- ชื่อผู้เล่นที่เพิ่มเป็นพันธมิตร
+
+    AntiAFKEnabled = false,
+    ZoomEnabled = false,
+    AntiFallEnabled = false,
+    AntiTeleportEnabled = false,
+    FPSCounterEnabled = false,
 
     WalkSpeedEnabled = false,
     WalkSpeedVal = 16,
@@ -49,7 +59,7 @@ _G.Settings = {
     RainbowESP = false
 }
 
--- รายชื่อผู้เล่นที่เป็นพันธมิตร (Whitelist เพื่อน/ไม่ล็อค)
+-- ตารางเก็บรายชื่อพันธมิตร
 _G.FriendlyPlayers = _G.FriendlyPlayers or {}
 
 _G.BoobSettings = {
@@ -106,7 +116,7 @@ local FOVGui = Instance.new("ScreenGui")
 FOVGui.Name = "HUB_FOV_GUI"
 FOVGui.ResetOnSpawn = false
 FOVGui.IgnoreGuiInset = true
-pcall(function() FOVGui.Parent = game:GetService("CoreGui") end)
+pcall(function() FOVGui.Parent = CoreGui end)
 if not FOVGui.Parent then FOVGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
 local FOVCircle = Instance.new("Frame", FOVGui)
@@ -122,10 +132,55 @@ local FOVStroke = Instance.new("UIStroke", FOVCircle)
 FOVStroke.Thickness = 2
 FOVStroke.Color = Color3.fromRGB(255, 255, 255)
 
+-- สร้าง GUI สำหรับ FPS สีรุ้ง (ลากได้)
+local FPSGui = Instance.new("ScreenGui")
+FPSGui.Name = "HUB_FPS_GUI"
+FPSGui.ResetOnSpawn = false
+FPSGui.IgnoreGuiInset = true
+pcall(function() FPSGui.Parent = CoreGui end)
+if not FPSGui.Parent then FPSGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
+
+local FPSLabel = Instance.new("TextLabel", FPSGui)
+FPSLabel.Name = "FPSLabel"
+FPSLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+FPSLabel.BackgroundTransparency = 0.5
+FPSLabel.Position = UDim2.new(0, 10, 0, 10)
+FPSLabel.Size = UDim2.fromOffset(110, 30)
+FPSLabel.Font = Enum.Font.GothamBold
+FPSLabel.Text = "FPS: 60"
+FPSLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+FPSLabel.TextSize = 14
+FPSLabel.Visible = false
+Instance.new("UICorner", FPSLabel).CornerRadius = UDim.new(0, 6)
+
+-- ระบบลาก FPS Label
+local dragging, dragInput, dragStart, startPos
+FPSLabel.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = FPSLabel.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        FPSLabel.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
 _G.WindUIInstance = WindUI
 _G.PlayerESPFolder = PlayerESPFolder
 _G.FOVStroke = FOVStroke
 _G.FOVCircle = FOVCircle
+_G.FPSLabel = FPSLabel
+_G.FPSGui = FPSGui
 --========================================================
 -- [PART 2/4] COMBAT, AIMBOT & PHYSICS LOGIC
 --========================================================
@@ -151,21 +206,21 @@ local function isTeammate(p)
     return p.Team == LocalPlayer.Team
 end
 
--- ตรวจสอบว่าเป็นผู้เล่นพันธมิตรที่เลือกไว้หรือไม่
+-- เช็คระบบพันธมิตร (เปิดใช้งาน + มีรายชื่อ)
 local function isFriendly(p)
+    if not _G.Settings.FriendlyEnabled then return false end
     if _G.FriendlyPlayers[p.Name] or _G.FriendlyPlayers[tostring(p.UserId)] then
         return true
     end
     return false
 end
 
--- ตรวจสอบว่าอยู่ในเซฟโซนหรือไม่ (เช็คจาก Attribute หรือ Folder Safezone ในแมพ)
+-- เช็ค Safezone
 local function isInSafezone(char)
     if not char then return false end
     if char:GetAttribute("Safezone") or char:GetAttribute("InSafezone") then
         return true
     end
-    -- เช็คเผื่อแมพใช้เงื่อนไขอื่น เช่น Touching Safezone Part
     local root = char:FindFirstChild("HumanoidRootPart")
     if root then
         for _, part in ipairs(Workspace:GetPartsInPart(root)) do
@@ -198,7 +253,6 @@ local function GetClosestTarget()
 
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character and isAlive(p.Character) and not isTeammate(p) then
-            -- ถ้าอยู่ในพันธมิตร หรืออยู่ในเซฟโซน จะข้ามไม่ล็อคเป้า
             if not isFriendly(p) and not (_G.Settings.SafezoneCheck and isInSafezone(p.Character)) then
                 local part = p.Character:FindFirstChild(_G.Settings.AimPart) or p.Character:FindFirstChild("Head")
                 local hrp = p.Character:FindFirstChild("HumanoidRootPart")
@@ -220,20 +274,74 @@ local function GetClosestTarget()
     return target
 end
 
--- ระบบดูดของอัตโนมัติ (Item Aura)
+-- ระบบดูดของ (Item Aura) แก้ไขให้ดูดของที่ดรอปบนพื้นได้ชัวร์ขึ้น
 RunService.Heartbeat:Connect(function()
     if _G.Settings.ItemAuraEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
         local hrp = LocalPlayer.Character.HumanoidRootPart
-        for _, obj in ipairs(Workspace:GetDescendants()) do
-            if obj:IsA("TouchTransmitter") and obj.Parent and obj.Parent:IsA("BasePart") then
-                local part = obj.Parent
-                -- เช็คว่าเป็นไอเทมที่ดรอปอยู่บนพื้น
-                if (part.Position - hrp.Position).Magnitude <= 40 then
-                    firetouchinterest(hrp, part, 0)
-                    firetouchinterest(hrp, part, 1)
+        pcall(function()
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj:IsA("BasePart") and (obj.Name == "Handle" or obj.Parent:IsA("Tool") or obj.Name:lower():find("item") or obj.Name:lower():find("drop")) then
+                    if (obj.Position - hrp.Position).Magnitude <= 35 then
+                        firetouchinterest(hrp, obj, 0)
+                        firetouchinterest(hrp, obj, 1)
+                    end
                 end
             end
+        end)
+    end
+end)
+
+-- 1. ระบบกัน AFK
+LocalPlayer.Idled:Connect(function()
+    if _G.Settings.AntiAFKEnabled then
+        local vu = game:GetService("VirtualUser")
+        vu:Button2Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
+        task.wait(1)
+        vu:Button2Up(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
+    end
+end)
+
+-- 2. ขยายระยะซูมกล้อง
+RunService.RenderStepped:Connect(function()
+    _G.FPSLabel.Visible = _G.Settings.FPSCounterEnabled
+    if _G.Settings.FPSCounterEnabled then
+        _G.FPSLabel.Text = "FPS: " .. math.floor(1 / RunService.RenderStepped:Wait())
+        _G.FPSLabel.TextColor3 = GetRainbow(1)
+    end
+
+    if _G.Settings.ZoomEnabled then
+        LocalPlayer.CameraMaxZoomDistance = 999999
+    else
+        LocalPlayer.CameraMaxZoomDistance = 400
+    end
+end)
+
+-- 3. ระบบกันล้ม (ไม่ให้ลุกอัตโนมัติ / ล็อคสถานะ)
+LocalPlayer.CharacterAdded:Connect(function(char)
+    local hum = char:WaitForChild("Humanoid", 5)
+    if hum then
+        hum.StateChanged:Connect(function(_, newSte)
+            if _G.Settings.AntiFallEnabled then
+                if newSte == Enum.HumanoidStateType.FallingDown or newSte == Enum.HumanoidStateType.Ragdoll then
+                    hum:ChangeState(Enum.HumanoidStateType.GettingUp)
+                end
+            end
+        end)
+    end
+end)
+
+-- 4. ระบบกันถูกวาป
+local lastPos = nil
+RunService.Heartbeat:Connect(function()
+    if _G.Settings.AntiTeleportEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        local hrp = LocalPlayer.Character.HumanoidRootPart
+        if lastPos and (hrp.Position - lastPos).Magnitude > 150 then
+            hrp.CFrame = CFrame.new(lastPos)
+        else
+            lastPos = hrp.Position
         end
+    else
+        lastPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character.HumanoidRootPart.Position or nil
     end
 end)
 
@@ -305,7 +413,7 @@ local FOVCircle = _G.FOVCircle
 
 local HIGHLIGHT_CACHE = {}
 
--- สีระดับความแรร์ 5 ระดับ (1.เทา 2.ฟ้า 3.ม่วง 4.ทอง 5.แดง)
+-- สีระดับความแรร์ 5 ระดับ
 local RARITY_COLORS = {
     [1] = Color3.fromRGB(180, 180, 180),
     [2] = Color3.fromRGB(0, 170, 255),
@@ -323,11 +431,8 @@ local RARITY_COLORS = {
     ["Default"]   = Color3.fromRGB(255, 255, 255)
 }
 
--- ฟังก์ชันดึงชื่อไอเทมจริง (แก้ปัญหาแสดงผลเป็นตัวเลข ID)
 local function GetItemName(tool)
     if not tool then return "Unknown" end
-    
-    -- เช็ค Attribute หรือค่าภายใน
     local nameAttr = tool:GetAttribute("ItemName") or tool:GetAttribute("DisplayName") or tool:GetAttribute("Name")
     if nameAttr and tostring(nameAttr) ~= "" and tostring(nameAttr) ~= tostring(tool.Name) then 
         return tostring(nameAttr) 
@@ -338,7 +443,6 @@ local function GetItemName(tool)
         return tostring(nameObj.Value)
     end
     
-    -- ถ้าชื่อหลักเป็นตัวเลข ให้พยายามหา StringValue อื่นๆ ข้างใน
     if tonumber(tool.Name) then
         for _, child in ipairs(tool:GetChildren()) do
             if child:IsA("StringValue") and child.Name ~= "Rarity" and child.Name ~= "Tier" then
@@ -352,7 +456,6 @@ end
 
 local function GetItemColor(tool)
     if not tool then return RARITY_COLORS["Default"] end
-    
     local rarityVal = tool:GetAttribute("Rarity") or tool:GetAttribute("Tier") or tool:GetAttribute("RarityLevel")
     if not rarityVal then
         local child = tool:FindFirstChild("Rarity") or tool:FindFirstChild("Tier") or tool:FindFirstChild("RarityLevel")
@@ -412,10 +515,10 @@ local function CreatePlayerESP(Player)
     if _G.Settings.NameESP or _G.Settings.HealthESP or _G.Settings.ToolESP then
         local Billboard = Instance.new("BillboardGui", Folder)
         Billboard.Name = "PlayerInfo"
-        Billboard.Adornee = RootPart -- ย้ายมาติดที่กลางตัว
+        Billboard.Adornee = RootPart
         Billboard.AlwaysOnTop = true
         Billboard.Size = UDim2.fromOffset(220, 160)
-        Billboard.StudsOffset = Vector3.new(0, 0.5, 0) -- ปรับให้อยู่บริเวณกลางลำตัว
+        Billboard.StudsOffset = Vector3.new(0, 0.5, 0)
 
         local Container = Instance.new("Frame", Billboard)
         Container.BackgroundTransparency = 1
@@ -426,7 +529,6 @@ local function CreatePlayerESP(Player)
         Layout.VerticalAlignment = Enum.VerticalAlignment.Top
         Layout.Padding = UDim.new(0, 1)
 
-        -- 1. แสดงชื่อผู้เล่น (ถ้าเป็นพันธมิตรจะเปลี่ยนเป็นสีเขียว)
         if _G.Settings.NameESP then
             local NameLabel = Instance.new("TextLabel", Container)
             NameLabel.BackgroundTransparency = 1
@@ -437,7 +539,6 @@ local function CreatePlayerESP(Player)
             NameLabel.TextScaled = true
             NameLabel.Font = Enum.Font.GothamBold
 
-            -- อัปเดตสีชื่ออัตโนมัติหากมีการเปลี่ยนสถานะพันธมิตร
             task.spawn(function()
                 while NameLabel and NameLabel.Parent do
                     NameLabel.TextColor3 = isFriendly(Player) and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 255, 255)
@@ -446,7 +547,6 @@ local function CreatePlayerESP(Player)
             end)
         end
 
-        -- 2. แสดงระยะห่างและเปอร์เซ็นต์เลือด
         local InfoLabel = Instance.new("TextLabel", Container)
         InfoLabel.BackgroundTransparency = 1
         InfoLabel.Size = UDim2.fromOffset(210, 16)
@@ -479,7 +579,6 @@ local function CreatePlayerESP(Player)
             UpdateInfo()
         end)
 
-        -- 3. แสดงชื่อไอเทมเรียงลงมาตามสีความแรร์
         if _G.Settings.ToolESP then
             local ToolContainer = Instance.new("Frame", Container)
             ToolContainer.Name = "ToolContainer"
@@ -713,18 +812,20 @@ CombatTab:Toggle({
     Callback = function(v) Settings.SafezoneCheck = v; SaveConfig() end
 })
 
--- ระบบเลือกผู้เล่นเป็นพันธมิตร (ไม่ล็อค + ชื่อสีเขียว)
-local playerNames = {}
-for _, p in ipairs(Players:GetPlayers()) do
-    if p ~= LocalPlayer then table.insert(playerNames, p.Name) end
-end
+-- เมนูระบบพันธมิตร (เปิด/ปิด + พิมพ์ชื่อเพิ่ม)
+CombatTab:Toggle({
+    Title = "เปิดใช้งานระบบพันธมิตร (Whitelist)",
+    Value = Settings.FriendlyEnabled,
+    Callback = function(v) Settings.FriendlyEnabled = v; SaveConfig(); _G.RefreshPlayerESP() end
+})
 
-CombatTab:Dropdown({
-    Title = "เลือกผู้เล่นเป็นพันธมิตร (Whitelist)",
-    Values = playerNames,
+CombatTab:Input({
+    Title = "พิมพ์ชื่อผู้เล่นเพื่อเพิ่มเป็นพันธมิตร",
+    Placeholder = "ใส่ชื่อผู้เล่นที่นี่...",
+    Value = Settings.FriendlyNameInput,
     Callback = function(v)
-        if v then
-            _G.FriendlyPlayers[v] = not _G.FriendlyPlayers[v]
+        if v and v ~= "" then
+            _G.FriendlyPlayers[v] = true
             SaveConfig()
             _G.RefreshPlayerESP()
         end
@@ -790,6 +891,18 @@ ModTab:Toggle({
     Callback = function(v) Settings.InfiniteJumpEnabled = v; SaveConfig() end
 })
 
+ModTab:Toggle({
+    Title = "ขยายระยะซูมกล้อง (Max Zoom)",
+    Value = Settings.ZoomEnabled,
+    Callback = function(v) Settings.ZoomEnabled = v; SaveConfig() end
+})
+
+ModTab:Toggle({
+    Title = "กันล้ม (Anti-Ragdoll / Auto Stand)",
+    Value = Settings.AntiFallEnabled,
+    Callback = function(v) Settings.AntiFallEnabled = v; SaveConfig() end
+})
+
 -- TAB: ESP & VISUALS
 local VisualTab = Window:Tab({ Title = "ระบบแสดงผล (ESP)", Icon = "eye" })
 
@@ -823,8 +936,26 @@ VisualTab:Toggle({
     Callback = function(v) Settings.RainbowESP = v; _G.RefreshPlayerESP(); SaveConfig() end
 })
 
+VisualTab:Toggle({
+    Title = "แสดง FPS (สีรุ้ง/ลากได้)",
+    Value = Settings.FPSCounterEnabled,
+    Callback = function(v) Settings.FPSCounterEnabled = v; SaveConfig() end
+})
+
 -- TAB: MISC & FUN PHYSICS
 local MiscTab = Window:Tab({ Title = "ระบบเสริม & เซิร์ฟเวอร์", Icon = "sliders" })
+
+MiscTab:Toggle({
+    Title = "ป้องกันการโดนเตะ (Anti-AFK)",
+    Value = Settings.AntiAFKEnabled,
+    Callback = function(v) Settings.AntiAFKEnabled = v; SaveConfig() end
+})
+
+MiscTab:Toggle({
+    Title = "ป้องกันการถูกวาป (Anti-Teleport)",
+    Value = Settings.AntiTeleportEnabled,
+    Callback = function(v) Settings.AntiTeleportEnabled = v; SaveConfig() end
+})
 
 MiscTab:Toggle({
     Title = "เปิดใช้งาน Boob Physics (Soft-Body)",
@@ -874,4 +1005,4 @@ MiscTab:Button({
 })
 
 _G.RefreshPlayerESP()
-print("BLOCKSPIN MASTER COMBAT & ESP HUB LOADED SUCCESSFULLY WITH AUTO-SAVE!")
+print("BLOCKSPIN MASTER COMBAT & ESP HUB LOADED SUCCESSFULLY WITH ALL FEATURES!")
