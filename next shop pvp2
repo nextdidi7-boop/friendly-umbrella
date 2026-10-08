@@ -1,480 +1,628 @@
--- ==================== NEXT SHOP PVP - PART 1 ====================
+local BUILD_PROFILE = "Xeno"
+local env = (getgenv and getgenv()) or _G
+if env.MaxGanHubCleanup then
+    pcall(env.MaxGanHubCleanup)
+end
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local Debris = game:GetService("Debris")
 local Workspace = game:GetService("Workspace")
-local ContextActionService = game:GetService("ContextActionService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Stats = game:GetService("Stats")
+local UIS = game:GetService("UserInputService")
 
-local Remotes = ReplicatedStorage:FindFirstChild("Remotes")
-local Util = pcall(function() return require(ReplicatedStorage.Modules.Core.Util) end)
 local LocalPlayer = Players.LocalPlayer
-local Character = LocalPlayer.Character or LocalPlayer.CharacterAdded:Wait()
-local Humanoid = Character:WaitForChild("Humanoid")
-local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
-
-local w = {}
-local DroppedItems = Workspace:WaitForChild("DroppedItems", 5) or Workspace
 local Camera = Workspace.CurrentCamera
-local isTouch = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
-local SelectedAimPart = "Head"
-local enabled = false
-local highlightEnabled = false
-local highlights = {}
-local AutoSprintToggle = {Set = function() end}
+local AIM_FOV = 9999
+local MAX_ESP_DIST = 2000
+local AIM_LOCK_RESPONSE = 42
+local AimConfig = {
+    Mode = "Aim",
+    LockKey = Enum.KeyCode.F,
+    FOV = AIM_FOV,
+    ShowFOV = false,
+    StandingResponse = AIM_LOCK_RESPONSE,
+    VehicleResponse = 60,
+}
+env.MaxGanHubAimConfig = AimConfig
+local ignoredPlayers = type(env.MaxGanHubIgnoredPlayers) == "table" and env.MaxGanHubIgnoredPlayers or {}
+env.MaxGanHubIgnoredPlayers = ignoredPlayers
+local CharacterConfig = {
+    WalkSpeed = true,
+    SpeedMultiplier = 1.25,
+    HighJump = true,
+    JumpVelocity = 35,
+    JumpHeight = 10.7,
+    AntiKill = true,
+    AntiVehicleRagdoll = true,
+}
+env.MaxGanHubCharacterConfig = CharacterConfig
+local SnapConfig = { Key = Enum.KeyCode.V, Depth = 40 }
+env.MaxGanHubSnapConfig = SnapConfig
+local VehicleConfig = { Flight = false, Underground = false, Speed = 90, HoverHeight = 1, Depth = 30 }
+env.MaxGanHubVehicleConfig = VehicleConfig
 
-local function createHighlight(char)
-    local hl = Instance.new("Highlight")
-    hl.Adornee = char
-    hl.FillColor = Color3.fromRGB(0,170,255)
-    hl.OutlineColor = Color3.fromRGB(0,170,255)
-    hl.Parent = Workspace
-    return hl
-end
+local AutoHealConfig = { Enabled = false, Threshold = 50, AnimationSpeed = 2 }
+env.MaxGanHubAutoHealConfig = AutoHealConfig
 
-local function updateHighlights()
-    for p, hl in pairs(highlights) do
-        if not p.Character then hl:Destroy() highlights[p] = nil end
+local isRunning = true
+local Connections = {}
+local DrawObjects = {}
+local lockedTarget = nil
+local cameraLockTarget = nil
+local smoothedRotation = nil
+local standingScopeMode = nil
+local lockCamera = nil
+local lockCharacter = nil
+local activeLockSeat = nil
+local vehicleRotation = nil
+local vehicleFrameRotation = nil
+local vehicleLockOffset = nil
+local characterCleanup = nil
+local weaponCleanup = nil
+local collisionCleanup = nil
+local vehicleCleanup = nil
+local vehicleGuiCleanup = nil
+local nativeGunModule = nil
+local weaponOriginals = {}
+local driverCameraState = nil
+local status = {
+    Brand = "MaxGan Hub",
+    Build = "xeno-surface-noclip-20261007-23-" .. BUILD_PROFILE,
+    BuildProfile = BUILD_PROFILE,
+    AimLock = "Ready",
+    AimLockTarget = nil,
+    FPS = nil,
+    Ping = nil,
+    PingJitter = nil,
+    PingState = "Measuring",
+    PingSamples = 0,
+    Target = nil,
+    TargetDistance = nil,
+    State = "Starting",
+}
+env.MaxGanHubStatus = status
+local xenoCompatibility = BUILD_PROFILE == "Xeno" or env.MaxGanHubXenoCompatibility == true
+do
+    local identify = identifyexecutor or getexecutorname
+    if type(identify) == "function" then
+        local ok, name = pcall(identify)
+        if ok and type(name) == "string" then
+            xenoCompatibility = xenoCompatibility or string.find(string.lower(name), "xeno", 1, true) ~= nil
+        end
     end
 end
--- ==================== NEXT SHOP PVP - PART 2 ====================
-local Library
+status.ExecutorCompatibility = xenoCompatibility and "Xeno" or "Standard"
+local networkAccessError
+if type(getupvalues or (debug and debug.getupvalues)) ~= "function" then
+    networkAccessError = "Unsupported: actual closure upvalues unavailable"
+elseif type(filtergc) ~= "function" then
+    networkAccessError = "Unsupported: active module lookup unavailable"
+end
+
+local function requireGameModule(module)
+    if not xenoCompatibility then return require(module) end
+    status.GameModuleCompatibility = "Xeno: native game modules left untouched"
+    error("Xeno: native module access disabled to preserve vehicle controls", 0)
+end
+
+local function track(conn)
+    Connections[#Connections + 1] = conn
+    return conn
+end
+
+local function resolveActiveNetwork()
+    local read = getupvalues or (debug and debug.getupvalues)
+    if networkAccessError then return nil, nil, networkAccessError end
+    local modules = filtergc("table", { Keys = { "send", "get", "hook", "on_connect" } }, false)
+    local best, sequence, score = nil, nil, -1
+    for _, net in ipairs(modules) do
+        local ok, values = pcall(read, net.get)
+        if ok then
+            for _, value in pairs(values) do
+                if type(value) == "table" and type(rawget(value, "event")) == "number"
+                    and type(rawget(value, "func")) == "number" then
+                    local activity = value.event + value.func
+                    if activity > score then best, sequence, score = net, value, activity end
+                    break
+                end
+            end
+        end
+    end
+    if score <= 0 then return nil, nil, "Active network counters unavailable" end
+    return best, sequence
+end
+local function resolveGameGunModule(net)
+    local read = getupvalues or (debug and debug.getupvalues)
+    if not net or type(filtergc) ~= "function" or type(read) ~= "function" then return nil end
+    local modules = filtergc("table", { Keys = { "class", "equipped_gun", "calculate_bullet_direction" } }, false)
+    for _, guns in ipairs(modules) do
+        if type(guns.loaded) == "function" then
+            local ok, values = pcall(read, guns.loaded)
+            if ok then for _, value in pairs(values) do if value == net then return guns end end end
+        end
+    end
+end
+
+local function restoreDriverCamera()
+    local saved = driverCameraState
+    driverCameraState = nil
+    if not saved or not saved.camera.Parent then return end
+    if saved.camera.CameraSubject ~= saved.hum then return end
+    if saved.hum.Parent and saved.hum.SeatPart == saved.seat and saved.subject and saved.subject.Parent then
+        saved.camera.CameraSubject = saved.subject
+    elseif saved.hum.Parent then
+        saved.camera.CameraSubject = saved.hum
+    end
+end
+
+env.MaxGanHubCleanup = function()
+    isRunning = false
+    status.State = "Stopped"
+    status.AimLock = "Stopped"
+    status.AimLockTarget = nil
+    status.AimLockEnabled = false
+    status.AntiKill = "Stopped"
+    status.AntiKillReturnConfirmed = false
+    status.Snap = "Stopped"
+    status.PickupRecovery = "Stopped"
+    cameraLockTarget, smoothedRotation, lockCamera, lockCharacter = nil, nil, nil, nil
+    vehicleRotation, vehicleFrameRotation = nil, nil
+    vehicleLockOffset = nil
+    lockedTarget = nil
+    restoreDriverCamera()
+    if vehicleCleanup then pcall(vehicleCleanup) end
+    if characterCleanup then pcall(characterCleanup) end
+    if weaponCleanup then pcall(weaponCleanup) end
+    if collisionCleanup then pcall(collisionCleanup) end
+    if vehicleGuiCleanup then pcall(vehicleGuiCleanup) end
+    pcall(function() RunService:UnbindFromRenderStep("MaxGanHubAimLock") end)
+    pcall(function() RunService:UnbindFromRenderStep("MaxGanHubVehicleAimLock") end)
+    pcall(function() RunService:UnbindFromRenderStep("MaxGanHubESP") end)
+    for _, c in ipairs(Connections) do pcall(function() c:Disconnect() end) end
+    for _, o in ipairs(DrawObjects) do pcall(function() o:Remove() end) end
+    Connections, DrawObjects = {}, {}
+end
+local partCache = {}
+local function getParts(player)
+    local now = os.clock()
+    local c = partCache[player]
+    local currentChar = player.Character
+    if c and c.char and c.char == currentChar and c.char.Parent
+        and c.hum and c.hum.Parent == c.char
+        and c.root and c.root.Parent == c.char
+        and c.head and c.head.Parent == c.char and now - c.t < 1 then
+        return c
+    end
+    local char = currentChar or Workspace:FindFirstChild(player.Name)
+    if not char then
+        partCache[player] = nil
+        return nil
+    end
+    c = {
+        char = char,
+        hum = char:FindFirstChildOfClass("Humanoid"),
+        root = char:FindFirstChild("HumanoidRootPart"),
+        head = char:FindFirstChild("Head"),
+        t = now,
+    }
+    partCache[player] = c
+    return c
+end
+track(Players.PlayerRemoving:Connect(function(p) partCache[p] = nil end))
+
+local function isValid(player)
+    if not player or player == LocalPlayer or not player.Parent then return false end
+    local c = getParts(player)
+    if not c or not c.hum or not c.root or not c.root.Parent then return false end
+    return c.hum.Health > 0
+end
+
+local function getAimPart(player)
+    local c = getParts(player)
+    if not c then return nil end
+    if c.head and c.head.Parent then return c.head end
+    return nil
+end
+
+local function getEquippedGun()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    if nativeGunModule and nativeGunModule.equipped_gun then
+        local ok, gun = pcall(nativeGunModule.equipped_gun.get)
+        if ok and typeof(gun) == "Instance" and gun:IsDescendantOf(char) then return gun end
+    end
+    local tool = char and char:FindFirstChildOfClass("Tool")
+    if tool and tool:GetAttribute("AmmoType") then return tool end
+    for _, item in ipairs(char:GetChildren()) do
+        if item:IsA("Model") and item:GetAttribute("AmmoType") then return item end
+    end
+eend
+local function getAimScreenPoint(cam)
+    if getEquippedGun() then return cam.ViewportSize / 2 end
+    local gui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+    local screen = gui and gui:FindFirstChild("CrosshairScreenGui")
+    local frame = screen and screen:FindFirstChild("CrosshairFrame")
+    if screen and screen:IsA("ScreenGui") and screen.Enabled and screen.IgnoreGuiInset
+        and frame and frame:IsA("GuiObject") and frame.Visible then
+        local screenPoint = frame.AbsolutePosition + frame.AbsoluteSize / 2
+        local screenRay = cam:ScreenPointToRay(screenPoint.X, screenPoint.Y)
+        local viewportPoint = cam:WorldToViewportPoint(screenRay.Origin + screenRay.Direction * 100)
+        return Vector2.new(viewportPoint.X, viewportPoint.Y)
+    end
+    return cam.ViewportSize / 2
+end
+
+local function pickTarget()
+    Camera = Workspace.CurrentCamera
+    if not Camera then return nil end
+    local center = getAimScreenPoint(Camera)
+    local best, bestD = nil, math.huge
+    for _, player in ipairs(Players:GetPlayers()) do
+        if isValid(player) and not player:GetAttribute("SilentAimIgnore") and not ignoredPlayers[player.UserId] then
+            local part = getAimPart(player)
+            if part then
+                local sp, on = Camera:WorldToViewportPoint(part.Position)
+                if on then
+                    local d = (Vector2.new(sp.X, sp.Y) - center).Magnitude
+                    if d <= AimConfig.FOV and d < bestD then
+                        best, bestD = player, d
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+local aimLockEnabled = false
+local capturingLockKey = false
+local capturingSnapKey = false
+local capturingVehicleKey = false
+local toggleVehicleUnderground
+VehicleConfig.UndergroundKey = Enum.KeyCode.U
+local toggleSnap = nil
+local requestManualReturn = nil
+local refreshControls = nil
+
+local function setAimLockEnabled(enabled)
+    aimLockEnabled = enabled == true
+    status.AimLockEnabled = aimLockEnabled
+    if not aimLockEnabled then
+        restoreDriverCamera()
+        cameraLockTarget, smoothedRotation, lockCamera, lockCharacter = nil, nil, nil, nil
+        vehicleRotation, vehicleFrameRotation = nil, nil
+        vehicleLockOffset = nil
+        lockedTarget = nil
+        status.AimLock, status.AimLockTarget = "Ready", nil
+        status.Target, status.TargetDistance = nil, nil
+    end
+    if refreshControls then refreshControls() end
+end
+RunService:BindToRenderStep("MaxGanHubAimLock", Enum.RenderPriority.Last.Value + 3, function(dt)
+    if not isRunning then return end
+    if not isAimLockHeld() then resetCameraLock("Ready"); return end
+    local cam = Workspace.CurrentCamera
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if not cam or not hum or hum.Health <= 0 then
+        resetCameraLock("Waiting for character")
+        return
+    end
+    if cam.CameraType == Enum.CameraType.Scriptable then
+        resetCameraLock("Waiting for camera")
+        return
+    end
+    if lockCamera ~= cam or lockCharacter ~= char then
+        resetCameraLock("Ready")
+        lockCamera, lockCharacter = cam, char
+    end
+    if cameraLockTarget and not validLockTarget(cameraLockTarget) then
+        cameraLockTarget, smoothedRotation = nil, nil
+        vehicleRotation, vehicleFrameRotation = nil, nil
+        vehicleLockOffset = nil
+    end
+    local seat = hum.SeatPart
+    if seat ~= activeLockSeat then
+        restoreDriverCamera()
+        activeLockSeat = seat
+        smoothedRotation = nil
+        vehicleRotation, vehicleFrameRotation = nil, nil
+        vehicleLockOffset = nil
+    end
+    if not cameraLockTarget then cameraLockTarget = pickTarget() end
+    if not cameraLockTarget then resetCameraLock("No target"); return end
+    local head = getAimPart(cameraLockTarget)
+    if not head then resetCameraLock("No target"); return end
+    local position = cam.CFrame.Position
+    if (head.Position - position).Magnitude < 0.001 then return end
+
+    if seat then
+        if seat:IsA("VehicleSeat") and seat.Name == "DriverSeat" then
+            if not driverCameraState and cam.CameraSubject == seat then
+                driverCameraState = { camera = cam, hum = hum, seat = seat, subject = cam.CameraSubject }
+                cam.CameraSubject = hum
+                vehicleLockOffset = nil
+            end
+            status.AimLockMode = "Driver"
+        else
+            status.AimLockMode = "Passenger"
+        end
+    else
+        updateStandingLock(cam, head, dt)
+        status.AimLockMode = "On foot"
+    end
+    lockedTarget = cameraLockTarget
+    status.AimLock = "Tracking"
+    status.AimLockTarget = cameraLockTarget.Name
+end)
+local pendingReturn = env.MaxGanHubReturnAnchor
+local lastSafeReturn = nil
+local handledDownedCharacter = nil
+local downedClearedSince = nil
+local jumpHumanoid = nil
+local jumpSettings = nil
+
+local function currentBody()
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    local root = char and char:FindFirstChild("HumanoidRootPart")
+    if hum and root and hum.Health > 0 then return char, hum, root end
+end
+
+local function isVehicleAttached(hum, root)
+    if not hum then return false end
+    if hum.SeatPart or hum.Sit or hum:GetState() == Enum.HumanoidStateType.Seated then return true end
+    local char = hum.Parent
+    root = root or (char and char:FindFirstChild("HumanoidRootPart"))
+    local assembly = root and root.AssemblyRootPart
+    return assembly ~= nil and char ~= nil and not assembly:IsDescendantOf(char)
+end
+
+local function downed(hum)
+    return hum:GetAttribute("HasBeenDowned") == true or hum:GetAttribute("IsDead") == true
+end
+
+local vehicleState = nil
+local function driverVehicle()
+    local char, hum = currentBody()
+    local seat = hum and hum.SeatPart
+    if not seat or not seat:IsA("VehicleSeat") or seat.Occupant ~= hum
+        or downed(hum) then return end
+    local vehicle = seat:FindFirstAncestorOfClass("Model")
+    local chassis
+    while vehicle and vehicle ~= Workspace do
+        if vehicle:IsA("Model") then
+            chassis = vehicle:FindFirstChild("Chassis")
+            if not chassis then
+                local body = vehicle:FindFirstChild("Body")
+                chassis = body and body:FindFirstChild("Base")
+            end
+            if chassis and chassis:IsA("BasePart") then break end
+        end
+        vehicle = vehicle.Parent
+    end
+    if not vehicle or not vehicle:IsA("Model") or not chassis or not chassis:IsA("BasePart") or chassis.Anchored then return end
+    local assembly = chassis.AssemblyRootPart
+    if not assembly or not assembly:IsDescendantOf(vehicle) or assembly.Anchored then return end
+    if vehicle:GetAttribute("DisableControls") then return end
+    return vehicle, chassis, seat, char
+end
+local function returnVehicleUp()
+    local state = vehicleState or ensureVehicleState()
+    if not state then return end
+    local chassis = state.chassis
+    local position = chassis.Position
+    local box, size = state.vehicle:GetBoundingBox()
+    local bottomOffset = math.max(position.Y - box.Position.Y + size.Y / 2, size.Y / 2)
+    local params = RaycastParams.new()
+    params.FilterType = Enum.RaycastFilterType.Exclude
+    local excluded = { state.vehicle, state.char }
+    local vehicles = Workspace:FindFirstChild("Vehicles")
+    if vehicles then excluded[#excluded + 1] = vehicles end
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player.Character then excluded[#excluded + 1] = player.Character end
+    end
+    params.FilterDescendantsInstances = excluded
+    params.RespectCanCollide = true
+    local top = math.max(position.Y, 1000) + 512
+    local hit = Workspace:Raycast(Vector3.new(position.X, top, position.Z),
+        Vector3.new(0, -(top - Workspace.FallenPartsDestroyHeight + 100), 0), params)
+    if not hit or hit.Normal.Y < 0.3 then
+        status.VehicleMode = "Surface not found - keep holding"
+        return
+    end
+    local targetY = math.max(position.Y, hit.Position.Y + bottomOffset + 2)
+    local look = Vector3.new(chassis.CFrame.LookVector.X, 0, chassis.CFrame.LookVector.Z)
+    if look.Magnitude < 0.01 then look = Vector3.new(0, 0, -1) end
+    state.returnTarget = Vector3.new(position.X, targetY, position.Z)
+    state.returnSurfaceY = hit.Position.Y
+    setVehicleCollision(state, false)
+    state.returnParts = {}
+    for _, part in ipairs(state.vehicle:GetDescendants()) do
+        if part:IsA("BasePart") then state.returnParts[#state.returnParts + 1] = part end
+    end
+    for part, collides in pairs(state.collisions) do
+        if collides and part:IsDescendantOf(state.char) then state.returnParts[#state.returnParts + 1] = part end
+    end
+    state.returnCollisionSince = nil
+    state.returnProgressY, state.returnProgressAt = position.Y, os.clock()
+    state.returnLiftAttempts = 0
+    state.returnRotation = CFrame.lookAt(Vector3.zero, look).Rotation
+    state.returnDuration = math.max(12, (targetY - position.Y) / math.max(VehicleConfig.Speed, 10) * 2 + 5)
+    VehicleConfig.Underground, VehicleConfig.Flight = false, false
+    state.returning, state.stableSince = true, nil
+    state.returnStarted = os.clock()
+    setVehicleCollision(state, false)
+    status.VehicleMode = "Returning vehicle"
+end
+-- ==================== WIND UI SETUP ====================
+local A
 pcall(function()
-    Library = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
+    A = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 end)
 
-local Window
-if Library then
-    Window = Library:CreateWindow({
-        Title = "next shop[PVP]",
+local B
+if A then
+    B = A:CreateWindow({
+        Title = "next shop[PVP] & MaxGan",
         Icon = "rbxassetid://96571424247911",
         Author = "next shop[PVP]",
         Folder = "F3Hub",
-        Size = UDim2.fromOffset(650,400),
+        Size = UDim2.fromOffset(650, 400),
         Theme = "Dark",
         Transparent = true,
         Resizable = true,
         KeyCode = Enum.KeyCode.F3
     })
-    Window:EditOpenButton({
+    B:EditOpenButton({
         Title = "next shop[PVP]",
         Icon = "rbxassetid://96571424247911",
-        CornerRadius = UDim.new(0,16),
+        CornerRadius = UDim.new(0, 16),
         StrokeThickness = 2,
         Color = ColorSequence.new(Color3.fromHex("#1a1a1a"), Color3.fromHex("#8B0000")),
         OnlyMobile = false,
         Enabled = true,
         Draggable = true,
     })
-    Window:Tag({
+    B:Tag({
         Title = "PVP | Paid",
         Icon = "github",
         Color = Color3.fromHex("#FF0000"),
         Radius = 13,
     })
 else
-    Window = {Tab = function() return {Section = function() end, Toggle = function() end, Slider = function() end, Button = function() end, Input = function() return {} end, Divider = function() end} end}
+    B = {Tab = function() return {Section = function() end, Toggle = function() end, Slider = function() end, Button = function() end, Input = function() end} end}
 end
 
-local ConfigManager = Window.ConfigManager
-local Config = ConfigManager and ConfigManager:CreateConfig("NextShopPVPConfig") or {Register = function() end, Save = function() end, Load = function() end, Delete = function() end}
-local RemoteSend
-pcall(function() RemoteSend = ReplicatedStorage:WaitForChild("Remotes",5):WaitForChild("Send",5) end)
-
-local F = false
-local G = false
-local H = 120
-local I
-local J
-local TracerLine = Drawing.new("Line")
-TracerLine.Thickness = 1; TracerLine.Color = Color3.fromRGB(255,50,50); TracerLine.Transparency = 1; TracerLine.Visible = false
--- ==================== NEXT SHOP PVP - PART 3 ====================
-local ESPTable = {}
-local M = false; local N = false; local O = false
-local P = {}
-local Q = false; local R = 0.05; local S = false; local T = false; local U = 40
-local V = false; local W = false; local X; local Y = 10; local Z; local _; local aa
-local ab = false
-local ac = 0; local ad = false; local ae = 1; local af = 0.4; local ag = false; local ah
-local ai = getgenv or function() return _G end
-ai().Sky = false; ai().SkyAmount = 1000
-local aj = false; local ak = false; local al = {}
-local am = -55; local an = 30; local ao = 0.1; local ap = 20
-local aq = 0; local ar = 0; local as = false
-local rarityColors = {Common = Color3.fromRGB(255,255,255), Uncommon = Color3.fromRGB(99,255,52), Rare = Color3.fromRGB(51,170,255), Epic = Color3.fromRGB(237,44,255), Legendary = Color3.fromRGB(255,150,0), Omega = Color3.fromRGB(255,20,51)}
-local au = {}; local av = {}; local aw = false; local ax; local ay = false; local az = {}
-local aA = 100; local aB = {}
-local aC
-
-pcall(function()
-    for _, eTable in ipairs(getgc(true)) do
-        if typeof(eTable) == "table" and rawget(eTable, "event") and rawget(eTable, "func") then aC = eTable break end
+-- ==================== UI TABS & FUNCTION BINDINGS ====================
+local aN_tab = B:Tab({Title = "การต่อสู้", Icon = "crosshair"})
+aN_tab:Section({Title = "GUN & AIM"})
+aN_tab:Toggle({
+    Title = "เล็งหัว / ล็อกเป้า (Aim Lock)",
+    Default = false,
+    Callback = function(v)
+        setAimLockEnabled(v)
     end
-end)
-
-local function getPing()
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    if not playerGui then return 0.2 end
-    local netStats = playerGui:FindFirstChild("NetworkStats")
-    if not netStats then return 0.2 end
-    local pingLabel = netStats:FindFirstChild("PingLabel")
-    if not pingLabel then return 0.2 end
-    local pingText = pingLabel.Text
-    if typeof(pingText) ~= "string" then return 0.2 end
-    local pingNum = tonumber(pingText:match("%d+"))
-    if not pingNum then return 0.2 end
-    local pingSec = pingNum / 1000
-    if pingSec < 0 or pingSec > 2 then pingSec = 0.2 end
-    return pingSec
-end
-
-local function isPlayerExcluded(name)
-    for _, exc in ipairs(P) do
-        if exc ~= "" and string.find(string.lower(name), string.lower(exc)) then return true end
+})
+aN_tab:Slider({
+    Title = "FOV ระยะการล็อก",
+    Step = 25,
+    Value = {Min = 25, Max = 1000, Default = AimConfig.FOV},
+    Callback = function(v)
+        AimConfig.FOV = v
     end
-    return false
-end
--- ==================== NEXT SHOP PVP - PART 4 ====================
-local function getClosestTarget()
-    local target; local shortestDist = H; local center = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-    for _, p in ipairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character then
-            local head = p.Character:FindFirstChild("Head")
-            local hum = p.Character:FindFirstChild("Humanoid")
-            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
-            if head and hum and hum.Health > 0 and hrp then
-                local screenPos, onScreen = Camera:WorldToViewportPoint(head.Position)
-                if onScreen then
-                    local screenVec = Vector2.new(screenPos.X, screenPos.Y)
-                    local dist = (screenVec - center).Magnitude
-                    if dist <= H and not isPlayerExcluded(p.Name) then
-                        if dist < shortestDist then shortestDist = dist target = p end
-                    end
-                end
-            end
-        end
+})
+aN_tab:Toggle({
+    Title = "แสดงวง FOV",
+    Default = AimConfig.ShowFOV,
+    Callback = function(v)
+        AimConfig.ShowFOV = v
     end
-    return target
-end
+})
 
-local function predictPosition(targetPart, targetHRP)
-    if not targetPart then return Vector3.zero end
-    local ping = (getPing and getPing()) or 0.2
-    if ping > 1 then ping = ping + 0.15 end
-    local vel = (targetHRP and targetHRP.AssemblyLinearVelocity) or Vector3.zero
-    return targetPart.Position + (vel * ping * 1)
-end
+local a1_tab = B:Tab({Title = "CHARACTER", Icon = "user"})
+a1_tab:Section({Title = "ตัวละคร & เคลื่อนที่"})
+a1_tab:Toggle({
+    Title = "ความเร็วเดิน (Walk Speed)",
+    Default = CharacterConfig.WalkSpeed,
+    Callback = function(v)
+        CharacterConfig.WalkSpeed = v
+    end
+})
+a1_tab:Slider({
+    Title = "ตัวคูณความเร็ว",
+    Step = 0.05,
+    Value = {Min = 1, Max = 3, Default = CharacterConfig.SpeedMultiplier},
+    Callback = function(v)
+        CharacterConfig.SpeedMultiplier = v
+    end
+})
+a1_tab:Toggle({
+    Title = "กระโดดสูง (High Jump)",
+    Default = CharacterConfig.HighJump,
+    Callback = function(v)
+        CharacterConfig.HighJump = v
+    end
+})
+a1_tab:Toggle({
+    Title = "ระบบกันตาย (Anti Kill)",
+    Default = CharacterConfig.AntiKill,
+    Callback = function(v)
+        CharacterConfig.AntiKill = v
+    end
+})
+a1_tab:Toggle({
+    Title = "กันรถชน / Ragdoll",
+    Default = CharacterConfig.AntiVehicleRagdoll,
+    Callback = function(v)
+        CharacterConfig.AntiVehicleRagdoll = v
+    end
+})
 
-local function isBehindWall(startPos, endPos)
-    if not startPos or not endPos then return false end
-    local dir = endPos - startPos
-    if dir.Magnitude < 1 then return false end
-    local ignoreList = {}
-    if LocalPlayer.Character then table.insert(ignoreList, LocalPlayer.Character) end
-    local raycastResult = Workspace:Raycast(startPos, dir, RaycastParams.new())
-    if not raycastResult then return false end
-    local hitInst = raycastResult.Instance
-    return hitInst and not table.find(ignoreList, hitInst.Parent)
-end
+a1_tab:Section({Title = "Snap / ดำดิน"})
+a1_tab:Button({
+    Title = "สลับสถานะ Snap Down / Up",
+    Callback = function()
+        toggleSnap()
+    end
+})
+a1_tab:Button({
+    Title = "ปลดล็อก Snap (Release)",
+    Callback = function()
+        releaseSnap()
+    end
+})
+a1_tab:Slider({
+    Title = "ระดับความลึก Snap",
+    Step = 5,
+    Value = {Min = 5, Max = 100, Default = SnapConfig.Depth},
+    Callback = function(v)
+        SnapConfig.Depth = v
+    end
+})
 
-local function setupCharacter(newChar)
-    Character = newChar
-    Humanoid = newChar:WaitForChild("Humanoid")
-    HumanoidRootPart = newChar:WaitForChild("HumanoidRootPart")
-    if _ then pcall(function() _:Disconnect() end) end
-    _ = RunService.RenderStepped:Connect(function()
-        if Q and Humanoid and HumanoidRootPart then
-            if Humanoid.MoveDirection.Magnitude > 0 then
-                HumanoidRootPart.CFrame = HumanoidRootPart.CFrame + (Humanoid.MoveDirection.Unit * R)
-            end
-        end
-    end)
-end
--- ==================== NEXT SHOP PVP - PART 6 ====================
-local function SafeCall(func, ...) local success, res = pcall(func, ...) return success, res end
-local unpackFunc = table.unpack or unpack
+local VehicleTab = B:Tab({Title = "Vehicle", Icon = "car"})
+VehicleTab:Section({Title = "ควบคุมยานพาหนะ"})
+VehicleTab:Toggle({
+    Title = "เปิดโหมดบินบนผิวดิน (Surface Glide)",
+    Default = VehicleConfig.Flight,
+    Callback = function(v)
+        setVehicleFlight(v)
+    end
+})
+VehicleTab:Toggle({
+    Title = "เปิดโหมดดำดินยานพาหนะ (Underground)",
+    Default = VehicleConfig.Underground,
+    Callback = function(v)
+        setVehicleUnderground(v)
+    end
+})
+VehicleTab:Button({
+    Title = "ดึงยานพาหนะกลับขึ้นด้านบน (Return UP)",
+    Callback = function()
+        returnVehicleUp()
+    end
+})
+VehicleTab:Slider({
+    Title = "ความเร็วยานพาหนะ",
+    Step = 5,
+    Value = {Min = 5, Max = 300, Default = VehicleConfig.Speed},
+    Callback = function(v)
+        VehicleConfig.Speed = v
+    end
+})
 
-local function CallRemote(remote, ...)
-    if not remote then return end
-    local args = {...}
-    if remote.ClassName == "RemoteEvent" then
-        if aC and type(aC.event) == "number" then
-            aC.event = aC.event + 1
-            SafeCall(function(...) remote:FireServer(aC.event, ...) end, unpackFunc(args))
-        else
-            aq = (aq or 0) + 1
-            SafeCall(function(...) remote:FireServer(aq, ...) end, unpackFunc(args))
-        end
-    elseif remote.ClassName == "RemoteFunction" then
-        if aC and type(aC.func) == "number" then
-            aC.func = aC.func + 1
-            SafeCall(function(...) remote:InvokeServer(aC.func, ...) end, unpackFunc(args))
-        else
-            ar = (ar or 0) + 1
-            SafeCall(function(...) remote:InvokeServer(ar, ...) end, unpackFunc(args))
+local bk_tab = B:Tab({Title = "MISC", Icon = "warehouse"})
+bk_tab:Section({Title = "ระบบอื่นๆ & ปิดใช้งาน"})
+bk_tab:Button({
+    Title = "หยุดการทำงานทั้งหมด (Stop All)",
+    Callback = function()
+        if env.MaxGanHubCleanup then
+            env.MaxGanHubCleanup()
         end
     end
-end
+})
 
-local function getPlayersInRange(range)
-    local list = {}
-    local char = LocalPlayer.Character
-    if not char or not char.PrimaryPart then return list end
-    local rootPos = char.PrimaryPart.Position
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer and p.Character and p.Character.PrimaryPart then
-            local success, dist = pcall(function() return (p.Character.PrimaryPart.Position - rootPos).Magnitude end)
-            if success and dist and dist <= range then table.insert(list, p) end
-        end
-    end
-    return list
-end
-
-local function getActiveTool()
-    local char = LocalPlayer and LocalPlayer.Character
-    if char then
-        for _, tObj in ipairs(char:GetChildren()) do
-            if tObj:IsA("Tool") then return tObj end
-        end
-    end
-    local bp = LocalPlayer and LocalPlayer:FindFirstChild("Backpack")
-    if bp then
-        for _, tObj in ipairs(bp:GetChildren()) do
-            if tObj:IsA("Tool") then return tObj end
-        end
-    end
-    return nil
-end
-
-local function isMeleeTool(tool)
-    if not tool then return false end
-    if tool.Name == "Fists" then return true end
-    local itemsFolder = ReplicatedStorage:FindFirstChild("Items")
-    if itemsFolder then
-        local meleeFolder = itemsFolder:FindFirstChild("melee")
-        local throwFolder = itemsFolder:FindFirstChild("throwable")
-        if meleeFolder and meleeFolder:FindFirstChild(tool.Name) and not (throwFolder and throwFolder:FindFirstChild(tool.Name)) then
-            return true
-        end
-    end
-    return false
-end
--- ==================== NEXT SHOP PVP - PART 7 ====================
-local function AttackNearby()
-    if not RemoteSend then return end
-    local char = LocalPlayer.Character
-    if not char or not char.PrimaryPart then return end
-    local activeTool = getActiveTool()
-    if not activeTool or not isMeleeTool(activeTool) then return end
-    local targets = getPlayersInRange(ap)
-    if #targets == 0 then return end
-    local rootPos = char.PrimaryPart.Position
-    local targetPlayers = {}
-    local targetPositions = {}
-    for _, p in pairs(targets) do
-        if p and p.Character and p.Character.PrimaryPart then
-            local head = p.Character:FindFirstChild("Head")
-            local hrp = p.Character.PrimaryPart
-            if head and hrp then
-                table.insert(targetPlayers, p)
-                table.insert(targetPositions, predictPosition(head, hrp))
-            end
-        end
-    end
-    if #targetPlayers == 0 then return end
-    local lookCF = CFrame.lookAt(rootPos, targetPositions[1])
-    local args = {"melee_attack", activeTool, targetPlayers, lookCF, 0.75}
-    pcall(function() CallRemote(RemoteSend, unpackFunc(args)) end)
-end
-
-local autoAttackRunning = false
-local function StartAutoAttack()
-    if autoAttackRunning then return end
-    autoAttackRunning = true
-    task.spawn(function()
-        while autoAttackRunning do
-            task.wait(af)
-            if ab and LocalPlayer and LocalPlayer.Character and LocalPlayer.Character.PrimaryPart then
-                pcall(AttackNearby)
-            end
-        end
-    end)
-end
-
--- ==================== ระบบกระโดดสูงที่แก้ไขแล้ว (ไม่กระโดดรัวซ้ำ) ====================
-ContextActionService:BindAction("FlyUp", function(actionName, inputState, inputObject)
-    if not S then return Enum.ContextActionResult.Pass end
-    local isSpace = (inputObject.UserInputType == Enum.UserInputType.Keyboard and inputObject.KeyCode == Enum.KeyCode.Space) or (inputObject.UserInputType == Enum.UserInputType.Touch)
-    if isSpace then
-        if inputState == Enum.UserInputState.Begin then
-            T = true
-            if Humanoid then Humanoid.Jump = true end
-            return Enum.ContextActionResult.Sink
-        elseif inputState == Enum.UserInputState.End then
-            T = false
-            return Enum.ContextActionResult.Sink
-        end
-    end
-    return Enum.ContextActionResult.Pass
-end, false, Enum.UserInputType.Touch, Enum.KeyCode.Space)
-
-RunService.RenderStepped:Connect(function()
-    if S and T and HumanoidRootPart then
-        HumanoidRootPart.Velocity = Vector3.new(HumanoidRootPart.Velocity.X, U, HumanoidRootPart.Velocity.Z)
-    end
-end)
-
-LocalPlayer.CharacterAdded:Connect(function(newChar)
-    local hum = newChar:WaitForChild("Humanoid")
-    if aa then aa:Disconnect() end
-    aa = hum:GetPropertyChangedSignal("Jumping"):Connect(function()
-        if S and hum.Jumping then T = true else T = false end
-    end)
-end)
--- ==================== NEXT SHOP PVP - PART 8 ====================
-RunService.Stepped:Connect(function()
-    pcall(function()
-        if G then I = getClosestTarget() end
-        I = (F or G) and getClosestTarget() or nil
-        local target = getClosestTarget()
-        if J and not isTouch then
-            J.Visible = F
-            if F then J.Radius = H end
-        end
-        if target and target.Character then
-            local char = target.Character
-            local hum = char:FindFirstChild("Humanoid")
-            local qPart = (SelectedAimPart == "HumanoidRootPart") and char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")
-            if hum and hum.Health > 0 and qPart then
-                local centerScreen = Vector2.new(Camera.ViewportSize.X/2, Camera.ViewportSize.Y/2)
-                local pos3D = qPart.Position
-                local vPos, onScreen = Camera:WorldToViewportPoint(pos3D)
-                if onScreen then
-                    TracerLine.Visible = true
-                    TracerLine.From = centerScreen
-                    TracerLine.To = Vector2.new(vPos.X, vPos.Y)
-                else
-                    TracerLine.Visible = false
-                end
-            else
-                TracerLine.Visible = false
-            end
-        else
-            TracerLine.Visible = false
-        end
-        if S and T and HumanoidRootPart then
-            local vel = HumanoidRootPart.Velocity
-            HumanoidRootPart.Velocity = Vector3.new(vel.X, U, vel.Z)
-        end
-    end)
-end)
-
-LocalPlayer.CharacterAdded:Connect(function(newChar)
-    Character = newChar
-    Humanoid = newChar:WaitForChild("Humanoid")
-    HumanoidRootPart = newChar:WaitForChild("HumanoidRootPart")
-end)
-if LocalPlayer.Character then setupCharacter(LocalPlayer.Character) end
-
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.F3 and Window and Window.Toggle then
-        Window:Toggle()
-    end
-end)
--- ==================== NEXT SHOP PVP - PART 9 ====================
-local TabCombat = Window:Tab({Title = "การต่อสู้", Icon = "crosshair"})
-TabCombat:Section({Title = "GUN"})
-local tSilent = TabCombat:Toggle({Title = "เล็งเงียบ", Default = false, Callback = function(v) F = v; I = nil end})
-Config:Register("SilentAim", tSilent)
-local tAttach = TabCombat:Toggle({Title = "ล็อกเส้นสีแดง", Default = false, Callback = function(v) G = v; I = nil end})
-Config:Register("SilentAimAttach", tAttach)
-local sFOV = TabCombat:Slider({Title = "FOV", Step = 1, Value = {Min = 20, Max = 800, Default = H}, Callback = function(v) H = tonumber(v) or 120 end})
-Config:Register("FOVRadius", sFOV)
-
-local TabChar = Window:Tab({Title = "CHARACTER", Icon = "user"})
-TabChar:Section({Title = "CHARACTER"})
-local tSpeed = TabChar:Toggle({Title = "Walk Speed", Default = false, Callback = function(v) Q = v end})
-Config:Register("วิ่งเร็ว", tSpeed)
-local sSpeed = TabChar:Slider({Title = "ความเร็ว", Step = 0.5, Value = {Min = 1, Max = 5, Default = 2}, Callback = function(v) R = v * 0.05 end})
-Config:Register("SpeedMultiplier", sSpeed)
-local tJump = TabChar:Toggle({Title = "กระโดดสูง", Default = false, Callback = function(v) S = v; if not S then T = false end end})
-Config:Register("กระโดดสูง", tJump)
-
-local TabESP = Window:Tab({Title = "ESP", Icon = "eye"})
-TabESP:Section({Title = "ESP"})
-local tNameESP = TabESP:Toggle({Title = "ชื่อ", Default = false, Callback = function(v) M = v end})
-Config:Register("NameESP", tNameESP)
-local tHealthESP = TabESP:Toggle({Title = "เลือด", Default = false, Callback = function(v) O = v end})
-Config:Register("HealthESP", tHealthESP)
-local tDistESP = TabESP:Toggle({Title = "ระยะทาง", Default = false, Callback = function(v) N = v end})
-Config:Register("DistanceESP", tDistESP)
--- ==================== NEXT SHOP PVP - PART 10 ====================
-local TabMisc = Window:Tab({Title = "MISC", Icon = "warehouse"})
-TabMisc:Button({Title = "Server Rejoin", Desc = "กลับเข้าห้องเดิม", Callback = function()
-    game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
-end})
-
-local function createESP(p)
-    if ESPTable[p] then return end
-    local txtName = Drawing.new("Text")
-    txtName.Size = 16; txtName.Center = true; txtName.Outline = true; txtName.Color = Color3.fromRGB(255,255,255); txtName.Font = 4
-    local txtDist = Drawing.new("Text")
-    txtDist.Size = 14; txtDist.Center = true; txtDist.Outline = true; txtDist.Color = Color3.fromRGB(255,255,255); txtDist.Font = 4
-    local drawings = {txtName, txtDist}
-    
-    local conn = RunService.RenderStepped:Connect(function()
-        if not p or not p.Character or not p.Character:FindFirstChild("HumanoidRootPart") then
-            for _, d in pairs(drawings) do d.Visible = false end
-            return
-        end
-        local hrp = p.Character.HumanoidRootPart
-        local dist = 0
-        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-            dist = (hrp.Position - LocalPlayer.Character.HumanoidRootPart.Position).Magnitude
-        end
-        local screenPos, onScreen = Camera:WorldToViewportPoint(hrp.Position)
-        if not onScreen or screenPos.Z <= 0 then
-            for _, d in pairs(drawings) do d.Visible = false end
-            return
-        end
-        if M then
-            txtName.Text = p.Name
-            txtName.Position = Vector2.new(screenPos.X, screenPos.Y - 15)
-            txtName.Visible = true
-        else
-            txtName.Visible = false
-        end
-        if N then
-            txtDist.Text = string.format("%.0f studs", dist)
-            txtDist.Position = Vector2.new(screenPos.X, screenPos.Y + 10)
-            txtDist.Visible = true
-        else
-            txtDist.Visible = false
-        end
-    end)
-    ESPTable[p] = {conn = conn, drawings = drawings}
-end
-
-for _, p in pairs(Players:GetPlayers()) do
-    if p ~= LocalPlayer then createESP(p) end
-end
-Players.PlayerAdded:Connect(function(p)
-    if p ~= LocalPlayer then
-        p.CharacterAdded:Connect(function() task.wait(0.5) createESP(p) end)
-        if p.Character then createESP(p) end
-    end
-end)
-Players.PlayerRemoving:Connect(function(p)
-    if ESPTable[p] then
-        for _, d in pairs(ESPTable[p].drawings) do pcall(function() d:Remove() end) end
-        if ESPTable[p].conn then pcall(function() ESPTable[p].conn:Disconnect() end) end
-        ESPTable[p] = nil
-    end
-end)
-
-StartAutoAttack()
-print("✅ next shop[PVP] Universal Loaded Successfully!")
+print("[MaxGan Hub] UI Successfully Loaded with all background combat functions!")
