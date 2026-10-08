@@ -56,7 +56,7 @@ local B
 if A then
     B=A:CreateWindow({
         Title="next shop[PVP]",
-        Icon="rbxassetid://11818627075",
+        Icon="rbxassetid://96571424247911",
         Author="next shop[PVP]",
         Folder="F3Hub",
         Size=UDim2.fromOffset(650,400),
@@ -67,7 +67,7 @@ if A then
     })
     B:EditOpenButton({
         Title = "next shop[PVP]",
-        Icon = "rbxassetid://111671492838197",
+        Icon = "rbxassetid://96571424247911",
         CornerRadius = UDim.new(0,16),
         StrokeThickness = 2,
         Color = ColorSequence.new(Color3.fromHex("#1a1a1a"), Color3.fromHex("#8B0000")),
