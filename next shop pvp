@@ -890,28 +890,109 @@ b.Heartbeat:Connect(function()
     pcall(CheckAndPickup)
 end)
 
-h:BindAction("FlyUp",function(aN,aO,aP)
-    if not S then return Enum.ContextActionResult.Pass end
-    local aQ=false
-    if aP.UserInputType==Enum.UserInputType.Keyboard and aP.KeyCode==Enum.KeyCode.Space then aQ=true end
-    if aP.UserInputType==Enum.UserInputType.Touch then aQ=true end
-    if aQ then
-        if aO==Enum.UserInputState.Begin then T=true; t.Jump=true; return Enum.ContextActionResult.Sink
-        elseif aO==Enum.UserInputState.End then T=false; return Enum.ContextActionResult.Sink end
-    end
-    return Enum.ContextActionResult.Pass
-end,false,Enum.UserInputType.Touch,Enum.KeyCode.Space)
+local Jumping = false
+local JumpButton
+local JumpButtonConnections = {}
 
-b.RenderStepped:Connect(function(aN)
-    if S and T then u.Velocity=Vector3.new(u.Velocity.X,U,u.Velocity.Z) end
+local function disconnectJumpButton()
+for _, connection in ipairs(JumpButtonConnections) do
+pcall(function() connection:Disconnect() end)
+end
+table.clear(JumpButtonConnections)
+JumpButton = nil
+end
+
+local function findJumpButton()
+disconnectJumpButton()
+local PlayerGui = r:FindFirstChildOfClass("PlayerGui")
+if not PlayerGui then return end
+local TouchGui = PlayerGui:FindFirstChild("TouchGui")
+if not TouchGui then return end
+local foundButton
+
+for _, object in ipairs(TouchGui:GetDescendants()) do  
+    if object:IsA("ImageButton") or object:IsA("TextButton") then  
+        local objectName = string.lower(object.Name)  
+        if objectName == "jumpbutton" or string.find(objectName, "jump") then  
+            foundButton = object  
+            break  
+        end  
+    end  
+end  
+
+if not foundButton then return end  
+JumpButton = foundButton  
+
+table.insert(JumpButtonConnections,  
+    JumpButton.InputBegan:Connect(function(input)  
+        if not S then return end  
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then  
+            Jumping = true  
+            if t and t.Parent then t.Jump = true end  
+        end  
+    end)  
+)  
+
+table.insert(JumpButtonConnections,  
+    JumpButton.InputEnded:Connect(function(input)  
+        if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then  
+            Jumping = false  
+        end  
+    end)  
+)
+
+end
+
+task.spawn(function()
+for i = 1, 30 do
+if not JumpButton then findJumpButton() end
+if JumpButton then break end
+task.wait(0.2)
+end
 end)
 
-r.CharacterAdded:Connect(function(aN)
-    local aO=aN:WaitForChild("Humanoid")
-    if aa then aa:Disconnect() end
-    aa=aO:GetPropertyChangedSignal("Jumping"):Connect(function()
-        if S and aO.Jumping then T=true else T=false end
-    end)
+d.InputBegan:Connect(function(input, gameProcessed)
+if gameProcessed or not S then return end
+if input.KeyCode == Enum.KeyCode.Space then
+Jumping = true
+if t and t.Parent then t.Jump = true end
+end
+end)
+
+d.InputEnded:Connect(function(input)
+if input.KeyCode == Enum.KeyCode.Space then
+Jumping = false
+end
+end)
+
+r.CharacterAdded:Connect(function(newCharacter)
+s = newCharacter
+t = newCharacter:WaitForChild("Humanoid")
+u = newCharacter:WaitForChild("HumanoidRootPart")
+Jumping = false
+task.wait(0.5)
+findJumpButton()
+end)
+
+b.RenderStepped:Connect(function()
+if not S or not Jumping then return end
+if not u or not u.Parent then return end
+u.Velocity = Vector3.new(u.Velocity.X, U, u.Velocity.Z)
+end)
+
+b.Heartbeat:Connect(function()
+if not r.Character then return end
+local RootPart = r.Character:FindFirstChild("HumanoidRootPart")
+if RootPart then u = RootPart end
+end)
+
+task.spawn(function()
+while true do
+if not JumpButton or not JumpButton.Parent then
+findJumpButton()
+end
+task.wait(1)
+end
 end)
 
 r.CharacterAdded:Connect(setupCharacter)
