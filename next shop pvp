@@ -56,7 +56,7 @@ local B
 if A then
     B=A:CreateWindow({
         Title="next shop[PVP]",
-        Icon="rbxassetid://111671492838197",
+        Icon="rbxassetid://11818627075",
         Author="next shop[PVP]",
         Folder="F3Hub",
         Size=UDim2.fromOffset(650,400),
