@@ -59,6 +59,7 @@ local activeLockSeat = nil
 local vehicleRotation = nil
 local vehicleFrameRotation = nil
 local vehicleLockOffset = nil
+local statusWindow = nil
 local characterCleanup = nil
 local weaponCleanup = nil
 local collisionCleanup = nil
@@ -107,6 +108,7 @@ local function requireGameModule(module)
     error("Xeno: native module access disabled to preserve vehicle controls", 0)
 end
 
+
 local function track(conn)
     Connections[#Connections + 1] = conn
     return conn
@@ -144,7 +146,6 @@ local function resolveGameGunModule(net)
         end
     end
 end
-
 local function restoreDriverCamera()
     local saved = driverCameraState
     driverCameraState = nil
@@ -168,15 +169,15 @@ env.MaxGanHubCleanup = function()
     status.Snap = "Stopped"
     status.PickupRecovery = "Stopped"
     cameraLockTarget, smoothedRotation, lockCamera, lockCharacter = nil, nil, nil, nil
-    vehicleRotation, vehicleFrameRotation = nil, nil
-    vehicleLockOffset = nil
-    lockedTarget = nil
     restoreDriverCamera()
     if vehicleCleanup then pcall(vehicleCleanup) end
     if characterCleanup then pcall(characterCleanup) end
     if weaponCleanup then pcall(weaponCleanup) end
     if collisionCleanup then pcall(collisionCleanup) end
     if vehicleGuiCleanup then pcall(vehicleGuiCleanup) end
+    status.AntiKill = "Stopped"
+    status.AntiKillReturnConfirmed = false
+    if statusWindow then pcall(function() statusWindow:Unload() end) end
     pcall(function() RunService:UnbindFromRenderStep("MaxGanHubAimLock") end)
     pcall(function() RunService:UnbindFromRenderStep("MaxGanHubVehicleAimLock") end)
     pcall(function() RunService:UnbindFromRenderStep("MaxGanHubESP") end)
@@ -184,6 +185,70 @@ env.MaxGanHubCleanup = function()
     for _, o in ipairs(DrawObjects) do pcall(function() o:Remove() end) end
     Connections, DrawObjects = {}, {}
 end
+if STATE and STATE.onCleanup then
+    STATE.onCleanup(env.MaxGanHubCleanup)
+end
+
+task.spawn(function()
+    local ok, guns = pcall(function()
+        if type(filtergc) == "function" then
+            local net = resolveActiveNetwork()
+            return assert(resolveGameGunModule(net), "Active gun module unavailable")
+        end
+        return requireGameModule(ReplicatedStorage.Modules.Game.ItemTypes.Gun)
+    end)
+    if not ok or not guns.class or not guns.class.objects then
+        status.WeaponCompatibility = ok and "Gun objects unavailable" or tostring(guns)
+        warn("[MaxGan Hub] Weapon accuracy unavailable")
+        return
+    end
+    if not isRunning then return end
+    nativeGunModule = guns
+    status.WeaponCompatibility = "Ready"
+    local originals = weaponOriginals
+    weaponCleanup = function()
+        for object, values in pairs(originals) do
+            pcall(function()
+                if object.states.accuracy.get() == 1 then object.states.accuracy.set(values.accuracy) end
+                if object.states.range.get() == 500 then object.states.range.set(values.range) end
+            end)
+        end
+        table.clear(originals)
+    end
+    while isRunning do
+        local char = LocalPlayer.Character
+        local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+        for _, object in pairs(guns.class.objects) do
+            local instance = object.instance
+            if instance and instance.Parent and object.states and object.states.accuracy and object.states.range
+                and ((char and instance:IsDescendantOf(char))
+                    or (backpack and instance:IsDescendantOf(backpack))) then
+                pcall(function()
+                    local accuracy, range = object.states.accuracy.get(), object.states.range.get()
+                    if type(accuracy) ~= "number" or type(range) ~= "number" then return end
+                    local values = originals[object]
+                    if not values then
+                        values = { accuracy = accuracy, range = range }
+                        originals[object] = values
+                    else
+                        if accuracy ~= 1 then values.accuracy = accuracy end
+                        if range ~= 500 then values.range = range end
+                    end
+                    if accuracy ~= 1 then object.states.accuracy.set(1) end
+                    if range ~= 500 then object.states.range.set(500) end
+                end)
+            elseif originals[object] then
+                local values = originals[object]
+                pcall(function()
+                    if object.states.accuracy.get() == 1 then object.states.accuracy.set(values.accuracy) end
+                    if object.states.range.get() == 500 then object.states.range.set(values.range) end
+                end)
+                originals[object] = nil
+            end
+        end
+        task.wait(0.2)
+    end
+end)
 local partCache = {}
 local function getParts(player)
     local now = os.clock()
@@ -238,7 +303,8 @@ local function getEquippedGun()
     for _, item in ipairs(char:GetChildren()) do
         if item:IsA("Model") and item:GetAttribute("AmmoType") then return item end
     end
-eend
+end
+
 local function getAimScreenPoint(cam)
     if getEquippedGun() then return cam.ViewportSize / 2 end
     local gui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
@@ -275,7 +341,6 @@ local function pickTarget()
     end
     return best
 end
-
 local aimLockEnabled = false
 local capturingLockKey = false
 local capturingSnapKey = false
@@ -285,7 +350,6 @@ VehicleConfig.UndergroundKey = Enum.KeyCode.U
 local toggleSnap = nil
 local requestManualReturn = nil
 local refreshControls = nil
-
 local function setAimLockEnabled(enabled)
     aimLockEnabled = enabled == true
     status.AimLockEnabled = aimLockEnabled
@@ -299,6 +363,140 @@ local function setAimLockEnabled(enabled)
         status.Target, status.TargetDistance = nil, nil
     end
     if refreshControls then refreshControls() end
+end
+track(UIS.InputBegan:Connect(function(input, processed)
+    if not isRunning or UIS:GetFocusedTextBox() then return end
+    if capturingLockKey or capturingSnapKey or capturingVehicleKey then
+        if input.UserInputType ~= Enum.UserInputType.Keyboard then return end
+        if input.KeyCode ~= Enum.KeyCode.Escape and input.KeyCode ~= Enum.KeyCode.Unknown then
+            if capturingVehicleKey then
+                local blocked = input.KeyCode == AimConfig.LockKey or input.KeyCode == SnapConfig.Key
+                    or input.KeyCode == Enum.KeyCode.W or input.KeyCode == Enum.KeyCode.A
+                    or input.KeyCode == Enum.KeyCode.S or input.KeyCode == Enum.KeyCode.D
+                    or input.KeyCode == Enum.KeyCode.Space or input.KeyCode == Enum.KeyCode.E
+                    or input.KeyCode == Enum.KeyCode.LeftShift or input.KeyCode == Enum.KeyCode.RightShift
+                if blocked then
+                    status.VehicleKeyError = "Key in use - choose another"
+                    if refreshControls then refreshControls() end
+                    return
+                end
+                VehicleConfig.UndergroundKey = input.KeyCode
+                status.VehicleKeyError = nil
+            elseif capturingSnapKey then
+                if input.KeyCode ~= AimConfig.LockKey and input.KeyCode ~= VehicleConfig.UndergroundKey then SnapConfig.Key = input.KeyCode end
+            elseif input.KeyCode ~= SnapConfig.Key and input.KeyCode ~= VehicleConfig.UndergroundKey then
+                AimConfig.LockKey = input.KeyCode
+            end
+        end
+        capturingLockKey = false
+        capturingSnapKey = false
+        capturingVehicleKey = false
+        if refreshControls then refreshControls() end
+        return
+    end
+    if processed then return end
+    if input.KeyCode == VehicleConfig.UndergroundKey then
+        if toggleVehicleUnderground then toggleVehicleUnderground() end
+        return
+    end
+    if input.KeyCode == SnapConfig.Key then
+        if toggleSnap then toggleSnap() end
+        return
+    end
+    if input.KeyCode == AimConfig.LockKey then setAimLockEnabled(not aimLockEnabled) end
+end))
+status.AimLockEnabled = false
+
+local function isAimLockHeld()
+    return aimLockEnabled and not capturingLockKey and not capturingSnapKey and not capturingVehicleKey and not UIS:GetFocusedTextBox()
+end
+
+local function validLockTarget(player)
+    return isValid(player) and not player:GetAttribute("SilentAimIgnore") and not ignoredPlayers[player.UserId]
+        and getAimPart(player) ~= nil
+end
+
+local function targetInFOV(player)
+    if not player or not validLockTarget(player) then return false end
+    local cam = Workspace.CurrentCamera
+    local part = getAimPart(player)
+    if not cam or not part then return false end
+    local point, visible = cam:WorldToViewportPoint(part.Position)
+    return visible and (Vector2.new(point.X, point.Y) - getAimScreenPoint(cam)).Magnitude <= AimConfig.FOV
+end
+local function selectedTarget()
+    if isAimLockHeld() and cameraLockTarget and validLockTarget(cameraLockTarget) then
+        return cameraLockTarget
+    end
+    return pickTarget()
+end
+local function resetCameraLock(state)
+    restoreDriverCamera()
+    cameraLockTarget, smoothedRotation, lockCamera, lockCharacter = nil, nil, nil, nil
+    vehicleRotation, vehicleFrameRotation = nil, nil
+    vehicleLockOffset = nil
+    activeLockSeat = nil
+    status.AimLockMode = nil
+    status.AimLock = state
+    status.AimLockTarget = nil
+end
+
+local function updateStandingLock(cam, head, dt)
+    local position = cam.CFrame.Position
+    local crosshair = getAimScreenPoint(cam)
+    local ray = cam:ViewportPointToRay(crosshair.X, crosshair.Y)
+    local localRay = cam.CFrame:VectorToObjectSpace(ray.Direction)
+    local correction = CFrame.lookAt(Vector3.zero, localRay):Inverse()
+    local desiredRotation = (CFrame.lookAt(position, head.Position) * correction).Rotation
+    local tool = getEquippedGun()
+    local sniper = tool ~= nil and tool:GetAttribute("SniperScope") ~= nil
+        and tool:GetAttribute("SniperScope") ~= false
+    if standingScopeMode ~= sniper then
+        standingScopeMode = sniper
+        smoothedRotation = nil
+    end
+    if sniper then
+        smoothedRotation = smoothedRotation or desiredRotation:ToObjectSpace(cam.CFrame.Rotation)
+        local alpha = 1 - math.exp(-AimConfig.StandingResponse * math.max(dt, 0))
+        smoothedRotation = smoothedRotation:Lerp(CFrame.identity, alpha)
+        local _, remainingAngle = smoothedRotation:ToAxisAngle()
+        if math.abs(remainingAngle) < math.rad(0.025) then smoothedRotation = CFrame.identity end
+        cam.CFrame = CFrame.new(position) * desiredRotation * smoothedRotation
+        status.AimLockTracking = "Sniper"
+        return
+    end
+    status.AimLockTracking = "Standard"
+    smoothedRotation = smoothedRotation or cam.CFrame.Rotation
+    local alpha = 1 - math.exp(-AimConfig.StandingResponse * math.max(dt, 0))
+    smoothedRotation = smoothedRotation:Lerp(desiredRotation, alpha)
+    local _, remainingAngle = smoothedRotation:ToObjectSpace(desiredRotation):ToAxisAngle()
+    if math.abs(remainingAngle) < math.rad(0.025) then smoothedRotation = desiredRotation end
+    cam.CFrame = CFrame.new(position) * smoothedRotation
+end
+
+local function vehicleDesiredRotation(cam, head)
+    local position = cam.CFrame.Position
+    if getEquippedGun() then
+        return CFrame.lookAt(position, head.Position, Vector3.yAxis).Rotation
+    end
+    local crosshair = getAimScreenPoint(cam)
+    local ray = cam:ViewportPointToRay(crosshair.X, crosshair.Y)
+    local localRay = cam.CFrame:VectorToObjectSpace(ray.Direction)
+    local correction = CFrame.lookAt(Vector3.zero, localRay):Inverse()
+    return (CFrame.lookAt(position, head.Position, Vector3.yAxis) * correction).Rotation
+end
+
+local function updateVehicleLock(cam, head, dt)
+    local position = cam.CFrame.Position
+    local desiredRotation = vehicleDesiredRotation(cam, head)
+    vehicleLockOffset = vehicleLockOffset or desiredRotation:ToObjectSpace(cam.CFrame.Rotation)
+    vehicleLockOffset = vehicleLockOffset:Lerp(CFrame.identity,
+        1 - math.exp(-AimConfig.VehicleResponse * math.max(dt, 0)))
+    local _, angle = vehicleLockOffset:ToAxisAngle()
+    if math.abs(angle) < math.rad(0.025) then vehicleLockOffset = CFrame.identity end
+    vehicleRotation = desiredRotation * vehicleLockOffset
+    vehicleFrameRotation = vehicleRotation
+    cam.CFrame = CFrame.new(position) * vehicleFrameRotation
 end
 RunService:BindToRenderStep("MaxGanHubAimLock", Enum.RenderPriority.Last.Value + 3, function(dt)
     if not isRunning then return end
@@ -357,13 +555,16 @@ RunService:BindToRenderStep("MaxGanHubAimLock", Enum.RenderPriority.Last.Value +
     status.AimLock = "Tracking"
     status.AimLockTarget = cameraLockTarget.Name
 end)
+
+local downedEscape = nil
+local snapState = nil
+local snapRecoveryOrigin = nil
 local pendingReturn = env.MaxGanHubReturnAnchor
 local lastSafeReturn = nil
 local handledDownedCharacter = nil
 local downedClearedSince = nil
 local jumpHumanoid = nil
 local jumpSettings = nil
-
 local function currentBody()
     local char = LocalPlayer.Character
     local hum = char and char:FindFirstChildOfClass("Humanoid")
@@ -380,8 +581,283 @@ local function isVehicleAttached(hum, root)
     return assembly ~= nil and char ~= nil and not assembly:IsDescendantOf(char)
 end
 
-local function downed(hum)
-    return hum:GetAttribute("HasBeenDowned") == true or hum:GetAttribute("IsDead") == true
+if xenoCompatibility then
+    local elapsed = 0
+    local observedSeat = nil
+    local hiddenSince = nil
+    local speedometer = nil
+    local speedLabel = nil
+    local savedVisible = nil
+    local savedText = nil
+    local savedScale = nil
+    local active = false
+    local function releaseSpeedometer()
+        if active and speedometer and speedometer.Parent then
+            speedometer.Visible = savedVisible
+            if speedLabel and speedLabel.Parent then speedLabel.Text = savedText end
+            local scale = speedometer:FindFirstChildOfClass("UIScale")
+            if scale and savedScale then scale.Scale = savedScale end
+        end
+        speedometer, speedLabel = nil, nil
+        savedVisible, savedText, savedScale = nil, nil, nil
+        hiddenSince, active = nil, false
+    end
+    vehicleGuiCleanup = releaseSpeedometer
+    track(RunService.Heartbeat:Connect(function(dt)
+        if not isRunning then return end
+        elapsed = elapsed + dt
+        if elapsed < 0.1 then return end
+        elapsed = 0
+        local ok, err = pcall(function()
+            local _, hum = currentBody()
+            local seat = hum and hum.SeatPart
+            if not hum or hum.Health <= 0 or not seat or seat.Name ~= "DriverSeat"
+                or not seat:IsA("VehicleSeat") or seat.Occupant ~= hum then
+                releaseSpeedometer()
+                observedSeat = nil
+                status.VehicleSpeedRecovery = "Idle"
+                return
+            end
+            if seat ~= observedSeat then
+                releaseSpeedometer()
+                observedSeat = seat
+            end
+            local vehicle = seat.Parent
+            local chassis = vehicle and vehicle:FindFirstChild("Chassis")
+            if not chassis or not chassis:IsA("BasePart") or vehicle:GetAttribute("DisableControls") then
+                releaseSpeedometer()
+                return
+            end
+            local playerGui = LocalPlayer:FindFirstChildOfClass("PlayerGui")
+            local gui = playerGui and playerGui:FindFirstChild("SpeedometerGui")
+            local frame = gui and gui:FindFirstChild("Speedometer")
+            local speedFrame = frame and frame:FindFirstChild("SpeedFrame")
+            local label = speedFrame and speedFrame:FindFirstChild("SpeedLabel")
+            if not gui or not gui.Enabled or not frame or not label or not label:IsA("TextLabel") then
+                releaseSpeedometer()
+                return
+            end
+            if frame ~= speedometer then
+                releaseSpeedometer()
+                speedometer, speedLabel = frame, label
+            end
+            if not active then
+                if frame.Visible then hiddenSince = nil; return end
+                hiddenSince = hiddenSince or os.clock()
+                if os.clock() - hiddenSince < 0.5 then return end
+                savedVisible, savedText = frame.Visible, label.Text
+                local scale = frame:FindFirstChildOfClass("UIScale")
+                savedScale = scale and scale.Scale
+                active = true
+            end
+            local mph = math.round(chassis.AssemblyLinearVelocity.Magnitude / 5280 * 3600)
+            label.Text = tostring(mph)
+            frame.Visible = true
+            local scale = frame:FindFirstChildOfClass("UIScale")
+            if scale then
+                scale.Scale = math.min(frame.AbsoluteSize.X, frame.AbsoluteSize.Y) < 500 and 0.8 or 1
+            end
+            status.VehicleSpeedMPH = mph
+            status.VehicleSpeedRecovery = "Native speedometer fallback"
+        end)
+        if not ok then status.VehicleSpeedRecovery = tostring(err) end
+    end))
+end
+local healData, healNetSequence, healGetRemote
+local healBusy, healElapsed, healNextAttempt = false, 0, 0
+local healInventoryRetryAt = 0
+local function findBloodBagTool(char, backpack)
+    for _, container in ipairs({ char, backpack }) do
+        if container then
+            for _, item in ipairs(container:GetChildren()) do
+                if item:IsA("Tool") and item.Name == "Blood Bag" then return item end
+            end
+        end
+    end
+end
+local function resolveHealInventory()
+    if healData and healNetSequence and healGetRemote then return true end
+    if os.clock() < healInventoryRetryAt then return false end
+    healInventoryRetryAt = os.clock() + 30
+    if type(filtergc) ~= "function" then return false end
+    local readUpvalues = getupvalues or (debug and debug.getupvalues)
+    if type(readUpvalues) ~= "function" then return false end
+    for _, data in ipairs(filtergc("table", { Keys = { "connected", "failed", "hook", "on_connect", "force_update" } }, false)) do
+        local ok, items = pcall(function() return data.items end)
+        if ok and type(items) == "table" then healData = data; break end
+    end
+    local net = filtergc("table", { Keys = { "send", "get", "hook", "on_connect" } }, true)
+    if net then
+        for _, value in pairs(readUpvalues(net.get)) do
+            if type(value) == "table" and type(value.event) == "number" and type(value.func) == "number" then
+                healNetSequence = value; break
+            end
+        end
+    end
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    healGetRemote = remotes and remotes:FindFirstChild("Get")
+    return healData ~= nil and healNetSequence ~= nil and healGetRemote ~= nil
+end
+local function bloodBagStack()
+    local items = healData and healData.items
+    local stacks = items and items.consumable and items.consumable["Blood Bag"]
+    for _, item in pairs(stacks or {}) do
+        if item.location == "hand" and (item.amount or 0) > 0 and item.guid then return item end
+    end
+end
+local function requestAutoHeal()
+    if not isRunning or not AutoHealConfig.Enabled or healBusy or os.clock() < healNextAttempt then return end
+    local char, hum = currentBody()
+    if not hum or hum.Health >= AutoHealConfig.Threshold or hum.Health >= hum.MaxHealth
+        or downed(hum) or hum:GetAttribute("Stunned") then return end
+    healBusy = true
+    status.AutoHealTriggeredAt = os.clock()
+    task.spawn(function()
+        local attemptCompleted = false
+        local spedTracks = {}
+        local function restoreHealTracks()
+            for animation, speed in pairs(spedTracks) do
+                pcall(function() if animation.IsPlaying then animation:AdjustSpeed(speed) end end)
+            end
+        end
+        local trackCleanup = { Disconnect = function()
+            if restoreHealTracks then restoreHealTracks() end
+        end }
+        track(trackCleanup)
+        local ok, err = pcall(function()
+            local backpack = LocalPlayer:FindFirstChildOfClass("Backpack")
+            local tool = findBloodBagTool(char, backpack)
+            if not tool then
+                if not resolveHealInventory() then status.AutoHeal = "Inventory access unavailable"; return end
+                local stack = bloodBagStack()
+                if not stack then status.AutoHeal = "No Blood Bag in carried inventory"; return end
+                status.AutoHeal = "Equipping Blood Bag"
+                healNetSequence.func += 1
+                healGetRemote:InvokeServer(healNetSequence.func, "toggle_equip_item", stack.guid)
+                local deadline = os.clock() + 4
+                repeat
+                    if not isRunning or not AutoHealConfig.Enabled or LocalPlayer.Character ~= char then return end
+                    tool = findBloodBagTool(char, backpack)
+                    if tool then break end
+                    task.wait(0.1)
+                until os.clock() >= deadline
+                if not tool then status.AutoHeal = "Blood Bag equip not confirmed"; return end
+            end
+            if not isRunning or not AutoHealConfig.Enabled or LocalPlayer.Character ~= char or hum.Health <= 0
+                or downed(hum) or hum.Health >= AutoHealConfig.Threshold then return end
+            local previous = char:FindFirstChildOfClass("Tool")
+            local healthBefore = hum.Health
+            hum:EquipTool(tool)
+            if tool.Parent ~= char then status.AutoHeal = "Blood Bag not held"; return end
+            status.AutoHeal = "Using Blood Bag"
+            status.AutoHealStartDelay = os.clock() - status.AutoHealTriggeredAt
+            local stackBefore = healData and bloodBagStack()
+            local amountBefore = stackBefore and stackBefore.amount
+            local useAnimation = tool:FindFirstChild("UseAnimation", true)
+            local useId = useAnimation and useAnimation.AnimationId:match("%d+") or "80735327245569"
+            local animator = hum:FindFirstChildOfClass("Animator")
+            tool:Activate()
+            local deadline = os.clock() + 30
+            local confirmed, consumed = false, false
+            repeat
+                task.wait(0.1)
+                if not isRunning or LocalPlayer.Character ~= char or hum.Health <= 0 then return end
+                if animator and tool.Parent == char then
+                    for _, animation in ipairs(animator:GetPlayingAnimationTracks()) do
+                        local id = animation.Animation and animation.Animation.AnimationId:match("%d+")
+                        if id == useId then
+                            if spedTracks[animation] == nil then spedTracks[animation] = animation.Speed end
+                            animation:AdjustSpeed(math.clamp(AutoHealConfig.AnimationSpeed, 1, 3))
+                        end
+                    end
+                end
+                if hum.Health > healthBefore + 1 then confirmed = true; break end
+                if stackBefore and amountBefore then
+                    local stackNow = bloodBagStack()
+                    if not stackNow or (stackNow.guid == stackBefore.guid and stackNow.amount < amountBefore) then
+                        consumed = true
+                        status.AutoHeal = "Blood Bag consumed - waiting for health"
+                    end
+                end
+                if consumed then
+                    task.wait(1)
+                    confirmed = hum.Health > healthBefore + 1
+                    break
+                end
+                if tool.Parent ~= char then break end
+            until os.clock() >= deadline
+            attemptCompleted = confirmed or consumed
+            status.AutoHeal = confirmed and "Health restored" or (consumed and "Bag consumed - health unchanged" or "Healing not confirmed")
+            if previous and previous ~= tool and previous.Parent == backpack and tool.Parent == char then
+                if confirmed then hum:EquipTool(previous) end
+            end
+        end)
+        restoreHealTracks()
+        table.clear(spedTracks)
+        local cleanupIndex = table.find(Connections, trackCleanup)
+        if cleanupIndex then table.remove(Connections, cleanupIndex) end
+        if not ok then status.AutoHeal = tostring(err) end
+        healNextAttempt = os.clock() + (attemptCompleted and 0.3 or 3)
+        healBusy = false
+    end)
+end
+local healObservedHumanoid, healHealthConnection
+track({ Disconnect = function()
+    if healHealthConnection then healHealthConnection:Disconnect(); healHealthConnection = nil end
+end })
+track(RunService.Heartbeat:Connect(function(dt)
+    if not isRunning then return end
+    local char = LocalPlayer.Character
+    local hum = char and char:FindFirstChildOfClass("Humanoid")
+    if hum ~= healObservedHumanoid then
+        if healHealthConnection then healHealthConnection:Disconnect() end
+        healObservedHumanoid = hum
+        healHealthConnection = hum and hum.HealthChanged:Connect(requestAutoHeal) or nil
+    end
+    healElapsed += dt
+    if healElapsed < 0.2 then return end
+    healElapsed = 0
+    requestAutoHeal()
+end))
+if xenoCompatibility then
+    local elapsed = 0
+    local detachedSince = nil
+    local observedHumanoid = nil
+    track(RunService.Heartbeat:Connect(function(dt)
+        if not isRunning then return end
+        elapsed = elapsed + dt
+        if elapsed < 0.25 then return end
+        elapsed = 0
+        local _, hum, root = currentBody()
+        if hum ~= observedHumanoid then
+            observedHumanoid = hum
+            detachedSince = nil
+        end
+        if not hum or not root or isVehicleAttached(hum, root) or downed(hum)
+            or hum.PlatformStand or hum:GetState() == Enum.HumanoidStateType.Physics
+            or hum:GetState() == Enum.HumanoidStateType.Ragdoll then
+            detachedSince = nil
+            return
+        end
+        detachedSince = detachedSince or os.clock()
+        if os.clock() - detachedSince < 0.5 then return end
+        local animator = hum:FindFirstChildOfClass("Animator")
+        if not animator then return end
+        local ok, err = pcall(function()
+            local stopped = 0
+            for _, animation in ipairs(animator:GetPlayingAnimationTracks()) do
+                if animation.Name == "DriveAnimation" then
+                    animation:Stop(0.15)
+                    stopped = stopped + 1
+                end
+            end
+            if stopped > 0 then
+                status.VehicleExitRecovery = "Stopped stale drive animations"
+                status.VehicleExitAnimationStops = (status.VehicleExitAnimationStops or 0) + stopped
+            end
+        end)
+        if not ok then status.VehicleExitRecovery = tostring(err) end
+    end))
 end
 
 local vehicleState = nil
@@ -409,220 +885,5 @@ local function driverVehicle()
     if vehicle:GetAttribute("DisableControls") then return end
     return vehicle, chassis, seat, char
 end
-local function returnVehicleUp()
-    local state = vehicleState or ensureVehicleState()
-    if not state then return end
-    local chassis = state.chassis
-    local position = chassis.Position
-    local box, size = state.vehicle:GetBoundingBox()
-    local bottomOffset = math.max(position.Y - box.Position.Y + size.Y / 2, size.Y / 2)
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    local excluded = { state.vehicle, state.char }
-    local vehicles = Workspace:FindFirstChild("Vehicles")
-    if vehicles then excluded[#excluded + 1] = vehicles end
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player.Character then excluded[#excluded + 1] = player.Character end
-    end
-    params.FilterDescendantsInstances = excluded
-    params.RespectCanCollide = true
-    local top = math.max(position.Y, 1000) + 512
-    local hit = Workspace:Raycast(Vector3.new(position.X, top, position.Z),
-        Vector3.new(0, -(top - Workspace.FallenPartsDestroyHeight + 100), 0), params)
-    if not hit or hit.Normal.Y < 0.3 then
-        status.VehicleMode = "Surface not found - keep holding"
-        return
-    end
-    local targetY = math.max(position.Y, hit.Position.Y + bottomOffset + 2)
-    local look = Vector3.new(chassis.CFrame.LookVector.X, 0, chassis.CFrame.LookVector.Z)
-    if look.Magnitude < 0.01 then look = Vector3.new(0, 0, -1) end
-    state.returnTarget = Vector3.new(position.X, targetY, position.Z)
-    state.returnSurfaceY = hit.Position.Y
-    setVehicleCollision(state, false)
-    state.returnParts = {}
-    for _, part in ipairs(state.vehicle:GetDescendants()) do
-        if part:IsA("BasePart") then state.returnParts[#state.returnParts + 1] = part end
-    end
-    for part, collides in pairs(state.collisions) do
-        if collides and part:IsDescendantOf(state.char) then state.returnParts[#state.returnParts + 1] = part end
-    end
-    state.returnCollisionSince = nil
-    state.returnProgressY, state.returnProgressAt = position.Y, os.clock()
-    state.returnLiftAttempts = 0
-    state.returnRotation = CFrame.lookAt(Vector3.zero, look).Rotation
-    state.returnDuration = math.max(12, (targetY - position.Y) / math.max(VehicleConfig.Speed, 10) * 2 + 5)
-    VehicleConfig.Underground, VehicleConfig.Flight = false, false
-    state.returning, state.stableSince = true, nil
-    state.returnStarted = os.clock()
-    setVehicleCollision(state, false)
-    status.VehicleMode = "Returning vehicle"
-end
--- ==================== WIND UI SETUP ====================
-local A
-pcall(function()
-    A = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
-end)
 
-local B
-if A then
-    B = A:CreateWindow({
-        Title = "next shop[PVP] & MaxGan",
-        Icon = "rbxassetid://96571424247911",
-        Author = "next shop[PVP]",
-        Folder = "F3Hub",
-        Size = UDim2.fromOffset(650, 400),
-        Theme = "Dark",
-        Transparent = true,
-        Resizable = true,
-        KeyCode = Enum.KeyCode.F3
-    })
-    B:EditOpenButton({
-        Title = "next shop[PVP]",
-        Icon = "rbxassetid://96571424247911",
-        CornerRadius = UDim.new(0, 16),
-        StrokeThickness = 2,
-        Color = ColorSequence.new(Color3.fromHex("#1a1a1a"), Color3.fromHex("#8B0000")),
-        OnlyMobile = false,
-        Enabled = true,
-        Draggable = true,
-    })
-    B:Tag({
-        Title = "PVP | Paid",
-        Icon = "github",
-        Color = Color3.fromHex("#FF0000"),
-        Radius = 13,
-    })
-else
-    B = {Tab = function() return {Section = function() end, Toggle = function() end, Slider = function() end, Button = function() end, Input = function() end} end}
-end
-
--- ==================== UI TABS & FUNCTION BINDINGS ====================
-local aN_tab = B:Tab({Title = "การต่อสู้", Icon = "crosshair"})
-aN_tab:Section({Title = "GUN & AIM"})
-aN_tab:Toggle({
-    Title = "เล็งหัว / ล็อกเป้า (Aim Lock)",
-    Default = false,
-    Callback = function(v)
-        setAimLockEnabled(v)
-    end
-})
-aN_tab:Slider({
-    Title = "FOV ระยะการล็อก",
-    Step = 25,
-    Value = {Min = 25, Max = 1000, Default = AimConfig.FOV},
-    Callback = function(v)
-        AimConfig.FOV = v
-    end
-})
-aN_tab:Toggle({
-    Title = "แสดงวง FOV",
-    Default = AimConfig.ShowFOV,
-    Callback = function(v)
-        AimConfig.ShowFOV = v
-    end
-})
-
-local a1_tab = B:Tab({Title = "CHARACTER", Icon = "user"})
-a1_tab:Section({Title = "ตัวละคร & เคลื่อนที่"})
-a1_tab:Toggle({
-    Title = "ความเร็วเดิน (Walk Speed)",
-    Default = CharacterConfig.WalkSpeed,
-    Callback = function(v)
-        CharacterConfig.WalkSpeed = v
-    end
-})
-a1_tab:Slider({
-    Title = "ตัวคูณความเร็ว",
-    Step = 0.05,
-    Value = {Min = 1, Max = 3, Default = CharacterConfig.SpeedMultiplier},
-    Callback = function(v)
-        CharacterConfig.SpeedMultiplier = v
-    end
-})
-a1_tab:Toggle({
-    Title = "กระโดดสูง (High Jump)",
-    Default = CharacterConfig.HighJump,
-    Callback = function(v)
-        CharacterConfig.HighJump = v
-    end
-})
-a1_tab:Toggle({
-    Title = "ระบบกันตาย (Anti Kill)",
-    Default = CharacterConfig.AntiKill,
-    Callback = function(v)
-        CharacterConfig.AntiKill = v
-    end
-})
-a1_tab:Toggle({
-    Title = "กันรถชน / Ragdoll",
-    Default = CharacterConfig.AntiVehicleRagdoll,
-    Callback = function(v)
-        CharacterConfig.AntiVehicleRagdoll = v
-    end
-})
-
-a1_tab:Section({Title = "Snap / ดำดิน"})
-a1_tab:Button({
-    Title = "สลับสถานะ Snap Down / Up",
-    Callback = function()
-        toggleSnap()
-    end
-})
-a1_tab:Button({
-    Title = "ปลดล็อก Snap (Release)",
-    Callback = function()
-        releaseSnap()
-    end
-})
-a1_tab:Slider({
-    Title = "ระดับความลึก Snap",
-    Step = 5,
-    Value = {Min = 5, Max = 100, Default = SnapConfig.Depth},
-    Callback = function(v)
-        SnapConfig.Depth = v
-    end
-})
-
-local VehicleTab = B:Tab({Title = "Vehicle", Icon = "car"})
-VehicleTab:Section({Title = "ควบคุมยานพาหนะ"})
-VehicleTab:Toggle({
-    Title = "เปิดโหมดบินบนผิวดิน (Surface Glide)",
-    Default = VehicleConfig.Flight,
-    Callback = function(v)
-        setVehicleFlight(v)
-    end
-})
-VehicleTab:Toggle({
-    Title = "เปิดโหมดดำดินยานพาหนะ (Underground)",
-    Default = VehicleConfig.Underground,
-    Callback = function(v)
-        setVehicleUnderground(v)
-    end
-})
-VehicleTab:Button({
-    Title = "ดึงยานพาหนะกลับขึ้นด้านบน (Return UP)",
-    Callback = function()
-        returnVehicleUp()
-    end
-})
-VehicleTab:Slider({
-    Title = "ความเร็วยานพาหนะ",
-    Step = 5,
-    Value = {Min = 5, Max = 300, Default = VehicleConfig.Speed},
-    Callback = function(v)
-        VehicleConfig.Speed = v
-    end
-})
-
-local bk_tab = B:Tab({Title = "MISC", Icon = "warehouse"})
-bk_tab:Section({Title = "ระบบอื่นๆ & ปิดใช้งาน"})
-bk_tab:Button({
-    Title = "หยุดการทำงานทั้งหมด (Stop All)",
-    Callback = function()
-        if env.MaxGanHubCleanup then
-            env.MaxGanHubCleanup()
-        end
-    end
-})
-
-print("[MaxGan Hub] UI Successfully Loaded with all background combat functions!")
+print("[MaxGan Hub] โหลดครบทุกส่วนแล้ว พร้อมใช้งาน 100%[span_1](start_span)[span_1](end_span)")
