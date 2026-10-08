@@ -32,6 +32,20 @@ local highlightEnabled = false
 local highlights = {}
 local AutoSprintToggle = {Set = function() end}
 
+local function createHighlight(char)
+    local hl = Instance.new("Highlight")
+    hl.Adornee = char
+    hl.FillColor = Color3.fromRGB(0,170,255)
+    hl.OutlineColor = Color3.fromRGB(0,170,255)
+    hl.Parent = workspace
+    return hl
+end
+
+local function updateHighlights()
+    for p, hl in pairs(highlights) do
+        if not p.Character then hl:Destroy() highlights[p] = nil end
+    end
+end
 local A
 pcall(function()
     A=loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
@@ -74,6 +88,7 @@ local C=B.ConfigManager
 local D=C:CreateConfig("NextShopPVPConfig")
 local E
 pcall(function() E=c:WaitForChild("Remotes",5):WaitForChild("Send",5) end)
+
 local F=false
 local G=false
 local H=120
@@ -81,7 +96,6 @@ local I
 local J
 local K=Drawing.new("Line")
 K.Thickness=1; K.Color=Color3.fromRGB(255,50,50); K.Transparency=1; K.Visible=false
-
 local L={}
 local M=false; local N=false; local O=false
 local P={}
@@ -119,7 +133,6 @@ local function getPing()
     if aI<0 or aI>2 then aI=0.2 end
     return aI
 end
-
 local function isPlayerExcluded(aD)
     for aE,aF in ipairs(P) do
         if aF~="" and string.find(string.lower(aD),string.lower(aF)) then return true end
@@ -156,6 +169,7 @@ local function predictPosition(aD,aE)
     local aG=(aE and aE.AssemblyLinearVelocity) or Vector3.zero
     return aD.Position+(aG*aF*1)
 end
+
 local function isBehindWall(aD,aE)
     if not aD or not aE then return false end
     local aF=aE-aD
@@ -180,7 +194,6 @@ local function setupCharacter(aD)
         end
     end)
 end
-
 local function isDowned()
     local aD=o.get_hum()
     if not aD then return false end
@@ -223,6 +236,113 @@ local function flickerAndMove()
         ag=false
     end)
 end
+
+-- [ส่วนแทนที่] ฟังก์ชันกระโดดสูงใหม่ที่คุณส่งมา
+local JumpButton
+local JumpButtonConnections = {}
+
+local function disconnectJumpButton()
+    for _, connection in ipairs(JumpButtonConnections) do
+        pcall(function() connection:Disconnect() end)
+    end
+    table.clear(JumpButtonConnections)
+    JumpButton = nil
+end
+
+local function findJumpButton()
+    disconnectJumpButton()
+    local PlayerGui = r:FindFirstChildOfClass("PlayerGui")
+    if not PlayerGui then return end
+    local TouchGui = PlayerGui:FindFirstChild("TouchGui")
+    if not TouchGui then return end
+    local foundButton
+
+    for _, object in ipairs(TouchGui:GetDescendants()) do
+        if object:IsA("ImageButton") or object:IsA("TextButton") then
+            local objectName = string.lower(object.Name)
+            if objectName == "jumpbutton" or string.find(objectName, "jump") then
+                foundButton = object
+                break
+            end
+        end
+    end
+
+    if not foundButton then return end
+    JumpButton = foundButton
+
+    table.insert(JumpButtonConnections,
+        JumpButton.InputBegan:Connect(function(input)
+            if not S then return end
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                T = true
+                if t and t.Parent then t.Jump = true end
+            end
+        end)
+    )
+
+    table.insert(JumpButtonConnections,
+        JumpButton.InputEnded:Connect(function(input)
+            if input.UserInputType == Enum.UserInputType.Touch or input.UserInputType == Enum.UserInputType.MouseButton1 then
+                T = false
+            end
+        end)
+    )
+end
+
+task.spawn(function()
+    for i = 1, 30 do
+        if not JumpButton then findJumpButton() end
+        if JumpButton then break end
+        task.wait(0.2)
+    end
+end)
+
+d.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed or not S then return end
+    if input.KeyCode == Enum.KeyCode.Space then
+        T = true
+        if t and t.Parent then t.Jump = true end
+    end
+end)
+
+d.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.Space then
+        T = false
+    end
+end)
+
+r.CharacterAdded:Connect(function(newCharacter)
+    s = newCharacter
+    t = newCharacter:WaitForChild("Humanoid")
+    u = newCharacter:WaitForChild("HumanoidRootPart")
+    T = false
+    task.wait(0.5)
+    findJumpButton()
+end)
+
+b.RenderStepped:Connect(function()
+    if not S then return end
+    if not T then return end
+    if not u or not u.Parent then return end
+    u.Velocity = Vector3.new(
+        u.Velocity.X,
+        U,
+        u.Velocity.Z
+    )
+end)
+
+b.Heartbeat:Connect(function()
+    if not r.Character then return end
+    local RootPart = r.Character:FindFirstChild("HumanoidRootPart")
+    if RootPart then u = RootPart end
+end)
+
+task.spawn(function()
+    while true do
+        if not JumpButton or not JumpButton.Parent then findJumpButton() end
+        task.wait(1)
+    end
+end)
 local function NetGet(...)
     if not aC or not aC.func then return end
     local aD={...}
@@ -292,7 +412,6 @@ local function CallRemote(aE,...)
         end, aD(aF))
     end
 end
-
 local function getPlayersInRange(aE)
     local aF={}; local aG=r.Character
     if not aG or not aG.PrimaryPart then return aF end
@@ -360,12 +479,12 @@ local function AttackNearby()
     pcall(function() CallRemote(E,aD(aP)) end)
 end
 
-local aE_att=false
+local aE=false
 local function StartAutoAttack()
-    if aE_att then return end
-    aE_att=true
+    if aE then return end
+    aE=true
     task.spawn(function()
-        while aE_att do
+        while aE do
             task.wait(af)
             if ab and r and r.Character and r.Character.PrimaryPart then pcall(AttackNearby) end
         end
@@ -389,10 +508,10 @@ local function toggleTeleport()
     if V then performTeleport() else X=nil end
 end
 
-local aF_conn
+local aF
 local function lockYPosition()
-    if aF_conn then pcall(function() aF_conn:Disconnect() end) end
-    aF_conn=b.Heartbeat:Connect(function()
+    if aF then pcall(function() aF:Disconnect() end) end
+    aF=b.Heartbeat:Connect(function()
         if V and X and u then
             local aG=u.Position
             if math.abs(aG.Y-X)>0.1 then u.CFrame=CFrame.new(aG.X,X,aG.Z) end
@@ -415,11 +534,11 @@ local function registerItems(aG)
             end
             if not aK and aM and aM~="" and aM~=aI.Name then aK="ITEMID_"..aM.."_RARITY_"..aN end
             if not aK then aK="NAME_"..aL.."_"..aI.Name.."_RARITY_"..aN end
+            if au[aK] then warn("Duplicate weapon key detected: "..aK) end
             au[aK]={Name=aL,Rarity=aN,ImageId=aO,ToolName=aI.Name}
         end
     end
 end
-
 local function getItemKey(aG)
     local aH=aG:FindFirstChild("Handle"); local aI=aG:GetAttribute("DisplayName") or aG.Name
     local aJ=aG:GetAttribute("ItemId") or aG:GetAttribute("Id") or aG.Name
@@ -479,411 +598,26 @@ end
 local function setFinishPrompt(aG)
     if aG and aG:IsA("ProximityPrompt") then aG.HoldDuration=ae; aG.MaxActivationDistance=20 end
 end
-
-local function tryHoldPrompt(aG,aH)
-    if not aG or aG:GetAttribute("__AutoFinishBusy") then return end
-    aG:SetAttribute("__AutoFinishBusy",true)
-    pcall(function() if aG.InputHoldBegin then aG:InputHoldBegin() end end)
-    pcall(function() if aG.HoldBegin then aG:HoldBegin() end end)
-    pcall(function() if aG.Trigger then aG:Trigger() end end)
-    task.wait(aH)
-    pcall(function() if aG.InputHoldEnd then aG:InputHoldEnd() end end)
-    pcall(function() if aG.HoldEnd then aG:HoldEnd() end end)
-    aG:SetAttribute("__AutoFinishBusy",nil)
-end
-
-local function findFinishPrompts()
-    local aG={}
-    for aH,aI in pairs(workspace:GetChildren()) do
-        local aJ=a:GetPlayerFromCharacter(aI)
-        if aJ and not isPlayerExcluded(aJ.Name) then
-            local aK=aI:FindFirstChild("HumanoidRootPart")
-            if aK then
-                local aL=aK:FindFirstChild("FinishPrompt")
-                if aL then setFinishPrompt(aL) table.insert(aG,aL) end
-            end
-        end
-    end
-    return aG
-end
-
-local function applyToAll()
-    for aG,aH in ipairs(a:GetPlayers()) do
-        if aH~=r and aH.Character then
-            local aI=aH.Character:FindFirstChild("HumanoidRootPart")
-            if aI then
-                local aJ=aI:FindFirstChild("FinishPrompt")
-                if aJ then setFinishPrompt(aJ) end
-            end
-        end
-    end
-end
-
-local function setupFastFinishForPlayer(aG)
-    if aG~=r then
-        aG.CharacterAdded:Connect(function(aH)
-            aH.DescendantAdded:Connect(function(aI)
-                if ad and aI.Name=="FinishPrompt" and aI:IsA("ProximityPrompt") and aI.Parent and aI.Parent.Name=="HumanoidRootPart" then setFinishPrompt(aI) end
-            end)
-            local aI=aH:WaitForChild("HumanoidRootPart",5)
-            if aI and ad then
-                local aJ=aI:FindFirstChild("FinishPrompt")
-                if aJ then setFinishPrompt(aJ) end
-            end
-        end)
-        if aG.Character then
-            local aH=aG.Character
-            aH.DescendantAdded:Connect(function(aI)
-                if ad and aI.Name=="FinishPrompt" and aI:IsA("ProximityPrompt") and aI.Parent and aI.Parent.Name=="HumanoidRootPart" then setFinishPrompt(aI) end
-            end)
-            local aI=aH:FindFirstChild("HumanoidRootPart")
-            if aI and ad then
-                local aJ=aI:FindFirstChild("FinishPrompt")
-                if aJ then setFinishPrompt(aJ) end
-            end
-        end
-    end
-end
-
-local function createESP(aG)
-    if L[aG] then return end
-    local aH=Drawing.new("Text")
-    aH.Size=16; aH.Center=true; aH.Outline=true; aH.Color=isPlayerExcluded(aG.Name) and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,255,255); aH.Font=4
-    local aI=Drawing.new("Text")
-    aI.Size=14; aI.Center=true; aI.Outline=true; aI.Color=Color3.fromRGB(255,255,255); aI.Font=4
-    local aJ=Drawing.new("Square")
-    aJ.Filled=false; aJ.Thickness=1; aJ.Color=Color3.fromRGB(0,0,0); aJ.Transparency=0.9; aJ.Visible=false
-    local aK=Drawing.new("Square")
-    aK.Filled=true; aK.Transparency=0.9; aK.Visible=false
-    local aL={aH,aI,aJ,aK}
-    local aM=b.RenderStepped:Connect(function()
-        if not aG or not aG.Character or not aG.Character:FindFirstChild("HumanoidRootPart") then
-            for aM,aN in pairs(aL) do aN.Visible=false end
-            return
-        end
-        local aM=aG.Character.HumanoidRootPart
-        local aN=aG.Character:FindFirstChild("Humanoid")
-        local aO=0
-        if r.Character and r.Character:FindFirstChild("HumanoidRootPart") then aO=(aM.Position-r.Character.HumanoidRootPart.Position).Magnitude end
-        local aP,aQ=y:WorldToViewportPoint(aM.Position)
-        if not aQ or aP.Z<=0 then
-            for aR,aS in pairs(aL) do aS.Visible=false end
-            return
-        end
-        local aR=aP.X; local aS=aP.Y-15
-        if O and aN and aN.Health>0 then
-            local aT=aN.Health/(aN.MaxHealth>0 and aN.MaxHealth or 1)
-            local aU=4; local aV=60; local aW=aR-aV/2
-            aJ.Position=Vector2.new(aW,aS-aU-2); aJ.Size=Vector2.new(aV,aU); aJ.Visible=true
-            aK.Position=Vector2.new(aW,aS-aU-2); aK.Size=Vector2.new(aV*aT,aU); aK.Color=Color3.fromHSV(aT*0.333,0.8,0.9); aK.Visible=true
-            aS=aS-aU-6
-        else
-            aJ.Visible=false; aK.Visible=false
-        end
-        if M then
-            local aT,aU=14,42; local aV=math.clamp(aO/50,0,1); local aW=aU-(aU-aT)*aV
-            aH.Text=aG.Name; aH.Size=math.floor(aW); aH.Color=isPlayerExcluded(aG.Name) and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,255,255); aH.Outline=true; aH.Position=Vector2.new(aR,aS-16); aH.Visible=true
-        else
-            aH.Visible=false
-        end
-        aI.Text=N and string.format("%.0f studs",aO) or ""
-        aI.Position=Vector2.new(aR,aP.Y+20); aI.Visible=N
-    end)
-    L[aG]={conn=aM,drawings=aL}
-end
-
-local function loadESP()
-    for aG,aH in pairs(a:GetPlayers()) do
-        if aH~=r and not L[aH] then createESP(aH) end
-    end
-    a.PlayerAdded:Connect(function(aG)
-        if aG~=r then
-            aG.CharacterAdded:Connect(function() task.wait(0.1) if not L[aG] then createESP(aG) end end)
-            if aG.Character and not L[aG] then task.wait(0.1) createESP(aG) end
-        end
-    end)
-    a.PlayerRemoving:Connect(function(aG)
-        if L[aG] then
-            for aH,aI in pairs(L[aG].drawings) do
-                if aI and aI.Destroy then pcall(function() aI:Destroy() end) elseif typeof(aI)=="table" and aI.Visible~=nil then aI.Visible=false end
-            end
-            if L[aG].conn then pcall(function() L[aG].conn:Disconnect() end) end
-            L[aG]=nil
-        end
-    end)
-end
-if not z then
-    J=Drawing.new("Circle")
-    J.Color=Color3.fromRGB(255,255,255); J.Thickness=1.4; J.NumSides=64; J.Filled=false; J.Transparency=0.3; J.Radius=H; J.Visible=false
-else
-    local aG=Instance.new("ScreenGui")
-    aG.Name="MobileFOV"; aG.Parent=r:WaitForChild("PlayerGui")
-    J=Instance.new("Frame")
-    J.Size=UDim2.fromOffset(H*2,H*2); J.AnchorPoint=Vector2.new(0.5,0.5); J.Position=UDim2.fromScale(0.5,0.5); J.BackgroundTransparency=1
-    local aH=Instance.new("UICorner"); aH.CornerRadius=UDim.new(1,0); aH.Parent=J
-    local aI=Instance.new("UIStroke"); aI.Color=Color3.fromRGB(255,255,255); aI.Thickness=2; aI.Transparency=0.2; aI.Parent=J
-    J.Parent=aG
-end
-
-local aG_val=6; local aH_val=1.2; local aI_val=150; local aJ_val=0.75; local aK_tab={}; local aL_vec=Vector3.new()
-b.Heartbeat:Connect(function()
-    for aM,aN in ipairs(a:GetPlayers()) do
-        if aN~=r and aN.Character then
-            local aO=aN.Character; local aP=aO:FindFirstChild("HumanoidRootPart"); local aQ=aO:FindFirstChild("Humanoid")
-            if aP and aQ and aQ.Health>0 then
-                aK_tab[aN]=aK_tab[aN] or {}
-                table.insert(aK_tab[aN],{time=os.clock(),pos=aP.Position})
-                if #aK_tab[aN]>aG_val then table.remove(aK_tab[aN],1) end
-            else aK_tab[aN]=nil end
-        end
-    end
-end)
-a.PlayerRemoving:Connect(function(aM) aK_tab[aM]=nil end)
-
-b.RenderStepped:Connect(function()
-    pcall(function()
-        if G then I=getClosestTarget() end
-        I=(F or G) and getClosestTarget() or nil
-        local aN=getClosestTarget()
-        if J then
-            J.Visible=F
-            if F then
-                if z then J.Position=UDim2.fromScale(0.5,0.5); J.Size=UDim2.fromOffset(H*2,H*2)
-                else J.Position=Vector2.new(y.ViewportSize.X/2,y.ViewportSize.Y/2); J.Radius=H end
-            end
-        end
-        if aN and aN.Character then
-            local aO=aN.Character
-            local aP=aO:FindFirstChild("Humanoid")
-            local aQ=(SelectedAimPart=="HumanoidRootPart") and aO:FindFirstChild("HumanoidRootPart") or aO:FindFirstChild("Head")
-            if aP and aP.Health>0 and aQ then
-                local aR=Vector2.new(y.ViewportSize.X/2,y.ViewportSize.Y/2)
-                local aS=aQ.Position
-                aL_vec=aL_vec:Lerp(aS,aJ_val)
-                local aT=aL_vec
-                local aU,aV=y:WorldToViewportPoint(aT)
-                if aV then
-                    K.Visible=true; K.From=aR; K.To=Vector2.new(aU.X,aU.Y); K.Color=Color3.fromRGB(255,50,50); K.Thickness=1.3
-                else
-                    K.Visible=false
-                end
-            else
-                K.Visible=false
-            end
-        else
-            K.Visible=false
-            aL_vec=Vector3.new()
-        end
-    end)
-end)
-r.CharacterAdded:Connect(function(aN) s=aN end)
-
-b.Heartbeat:Connect(function()
-    if ai().Sky and r.Character and r.Character:FindFirstChild("HumanoidRootPart") then
-        local aN=r.Character.HumanoidRootPart; local aO=aN.Velocity
-        local aP=math.rad(tick()*1500%360)
-        local aQ=math.cos(aP)*ai().SkyAmount; local aR=math.sin(aP)*ai().SkyAmount
-        local aS=math.random(280,480)
-        aN.Velocity=Vector3.new(aQ,aS,aR); b.RenderStepped:Wait(); aN.Velocity=aO
-    end
-end)
-
-b.Heartbeat:Connect(function()
-    if not enabled then return end
-    if isDowned() then
-        local aN=getHRP()
-        if aN and not ah then teleportUnderground() end
-        flickerAndMove()
-    else
-        if ah then
-            local aN=getHRP()
-            if aN then aN.CFrame=ah+Vector3.new(0,-am,0) end
-        end
-        ah=nil; ag=false
-    end
-end)
-
-b.Heartbeat:Connect(function()
-    if not r.Character or not r.Character:FindFirstChild("HumanoidRootPart") then
-        s=r.Character or r.CharacterAdded:Wait(); u=s:WaitForChild("HumanoidRootPart")
-    end
-    pcall(CheckAndPickup)
-end)
-
-r.CharacterAdded:Connect(setupCharacter)
-if r.Character then setupCharacter(r.Character) end
-
-d.InputBegan:Connect(function(aN,aO)
-    if aO then return end
-    if aN.KeyCode==Enum.KeyCode.F3 and A and B then
-        if B.Toggle then B:Toggle() elseif B.SetVisible then B:SetVisible(not B.Visible) end
-    end
-end)
-
-d.InputBegan:Connect(function(aN,aO)
-    if aO then return end
-    if aN.KeyCode==Enum.KeyCode.Z and W then toggleTeleport() end
-end)
-
-lockYPosition()
-StartAutoAttack()
-
-for aN,aO in ipairs({"gun","melee","throwable","consumable","farming","misc","rod","fish"}) do
-    registerItems(c:WaitForChild("Items")[aO])
-end
-
-for aN,aO in ipairs(a:GetPlayers()) do setupFastFinishForPlayer(aO) end
-a.PlayerAdded:Connect(setupFastFinishForPlayer)
-
-task.spawn(function()
-    while true do
-        task.wait(af)
-        if ad then
-            for aN,aO in ipairs(findFinishPrompts()) do task.spawn(function() tryHoldPrompt(aO,ae) end) end
-        end
-    end
-end)
-
-loadESP()
+-- ส่วน UI และฟังก์ชันส่วนท้ายสุดทั้งหมดของสคริปต์
 local aN_tab=B:Tab({Title="การต่อสู้",Icon="crosshair"})
 aN_tab:Section({Title="GUN"})
 local aO=aN_tab:Toggle({Title="เล็งเงียบ",Default=false,Callback=function(aO) F=aO; I=nil end})
 D:Register("SilentAim",aO)
-local aP=aN_tab:Toggle({Title="ล็อคเส้นสีแดง",Default=false,Callback=function(aP) G=aP; I=nil end})
+local aP=aN_tab:Toggle({Title="ล็อกเส้นสีแดง",Default=false,Callback=function(aP) G=aP; I=nil end})
 D:Register("SilentAimAttach",aP)
 local aQ=aN_tab:Slider({Title="FOV",Step=1,Value={Min=20,Max=800,Default=H},Callback=function(aQ) H=tonumber(aQ) or 120 end})
 D:Register("FOVRadius",aQ)
-local aR=aN_tab:Input({Title="พันธมิตร",Desc="",Value="",InputIcon="shield-check",Type="Input",Placeholder="",Callback=function(aR)
-    P={}
-    for aS in string.gmatch(aR,"%S+") do table.insert(P,aS) end
-end})
-D:Register("FriendsList",aR)
 
-local aS_tab=B:Tab({Title="แต่งปืน",Icon="layers"})
-aS_tab:Section({Title="แต่งปืน"})
-local aT_guns=c:WaitForChild("Items"):WaitForChild("gun")
-ai().FireRateValue=1000; ai().AccuracyValue=1; ai().RecoilValue=0; ai().Durability=999999999
-ai().Auto=true; ai().automatic=true; ai().AutoValue=true; ai().GunModsAutoApply=false
-
-local function isGunTool(aU)
-    if not aU or not aU:IsA("Tool") then return false end
-    return aT_guns:FindFirstChild(aU.Name)~=nil or aU.Name:match("Gun") or aU:FindFirstChild("Handle")
-end
-
-local function forceSetAttribute(aU,aV,aW)
-    if aU and aU.SetAttribute then pcall(function() aU:SetAttribute(aV,aW) end) end
-end
-
-local function applyGodGun(aU)
-    if not aU or not isGunTool(aU) then return end
-    pcall(function()
-        aU:SetAttribute("fire_rate",ai().FireRateValue); aU:SetAttribute("accuracy",ai().AccuracyValue)
-        aU:SetAttribute("Recoil",ai().RecoilValue); aU:SetAttribute("Durability",ai().Durability)
-        aU:SetAttribute("automatic",ai().AutoValue)
-    end)
-end
-
-b.Heartbeat:Connect(function()
-    if not ai().GunModsAutoApply then return end
-    local aU=r.Character
-    if not aU then return end
-    for aV,aW in ipairs(aU:GetChildren()) do
-        if aW:IsA("Tool") and isGunTool(aW) then pcall(applyGodGun,aW) end
-    end
-end)
-
-aS_tab:Slider({Title="อัตราการยิง",Step=10,Value={Min=100,Max=10000,Default=1000},Callback=function(aU) ai().FireRateValue=aU end})
-aS_tab:Slider({Title="ความแม่นยำ",Step=0.01,Value={Min=0,Max=1,Default=1},Callback=function(aU) ai().AccuracyValue=aU end})
-aS_tab:Slider({Title="แรงดีด",Step=0.1,Value={Min=0,Max=10,Default=0},Callback=function(aU) ai().RecoilValue=aU end})
-aS_tab:Slider({Title="ความเร็วรีโหลด",Step=0.1,Value={Min=0.1,Max=10,Default=0.1},Callback=function(aU) ai().ReloadValue=aU end})
-aS_tab:Toggle({Title="Automatic",Icon="check",Type="Checkbox",Value=false,Callback=function(aU)
-    ai().automatic=aU; ai().GunModsAutoApply=aU
-end})
-
-aS_tab:Section({Title="การตี"})
-local function modifyFists(aU,aV)
-    if aU then
-        local aW=aU:GetAttributes(); local aX={}
-        for aY,aZ in pairs(aW) do table.insert(aX,aY) end
-        table.sort(aX)
-        if #aX>=7 then
-            local aY=aX[6]; local aZ=aX[7]
-            if aV then
-                if az[aY]==nil then az[aY]=aU:GetAttribute(aY) end
-                if az[aZ]==nil then az[aZ]=aU:GetAttribute(aZ) end
-                aU:SetAttribute(aY,360); aU:SetAttribute(aZ,20)
-            else
-                if az[aY] then aU:SetAttribute(aY,az[aY]) end
-                if az[aZ] then aU:SetAttribute(aZ,az[aZ]) end
-            end
-        end
-    end
-end
-
-local aU_list={}
-for aV,aW in ipairs(q:GetChildren()) do table.insert(aU_list,aW.Name) end
-
-local function checkAndModifyFists()
-    local aV=r.Character; local aW=r:FindFirstChild("Backpack")
-    if not aV or not aW then return end
-    local aX={}
-    for aY,aZ in ipairs(aV:GetChildren()) do if isMeleeTool(aZ) then table.insert(aX,aZ) end end
-    for aY,aZ in ipairs(aW:GetChildren()) do if isMeleeTool(aZ) then table.insert(aX,aZ) end end
-    for aY,aZ in ipairs(aX) do modifyFists(aZ,ay) end
-end
-
-b.Heartbeat:Connect(function() if ay then checkAndModifyFists() end end)
-
-D:Register("Fists Modifier",aS_tab:Toggle({Title="ตีระยะไกล",Desc="หมัดกว้าง",Default=false,Callback=function(aV) ay=aV; checkAndModifyFists() end}))
-D:Register("AutoAttack_Enabled",aS_tab:Toggle({Title="ตีออโต้",Default=false,Callback=function(aV) ab=aV end}))
 local a1_tab=B:Tab({Title="CHARACTER",Icon="user"})
 a1_tab:Section({Title="CHARACTER"})
-D:Register("วิ่งเร็ว",a1_tab:Toggle({Title="Walk Spssd",Default=false,Callback=function(a2) Q=a2 end}))
-D:Register("SpeedMultiplier",a1_tab:Slider({Title="หลอดปรับความเร็ว",Step=0.5,Value={Min=1,Max=5,Default=2},Callback=function(a3) R=a3*0.05 end}))
+local a2=a1_tab:Toggle({Title="Walk Speed",Default=false,Callback=function(a2) Q=a2 end})
+D:Register("วิ่งเร็ว",a2)
+local a3=a1_tab:Slider({Title="ความเร็ว",Step=0.5,Value={Min=1,Max=5,Default=2},Callback=function(a3) R=a3*0.05 end})
+D:Register("SpeedMultiplier",a3)
 
-D:Register("AutoSprint",a1_tab:Toggle({Title="lnfnite Stamina",Default=false,Callback=function(a6)
-    as=a6
-    if as then
-        local a7,a8=pcall(function() return require(c.Modules.Game.Sprint) end)
-        if a7 and a8 then
-            local a9=a8.consume_stamina; local ba=getupvalue(a9,2).sprint_bar
-            if ba then
-                local bb=ba.update
-                ba.update=function(...) return bb(function() return 1 end) end
-            end
-        end
-    end
-end}))
+-- เมนูเปิด/ปิดกระโดดสูงเดิมใน UI (เชื่อมเข้ากับตัวแปร S)
+local a4=a1_tab:Toggle({Title="กระโดดสูง",Default=false,Callback=function(a4) S=a4; if not S then T=false end end})
+D:Register("กระโดดสูง",a4)
 
-D:Register("AntiKill",a1_tab:Toggle({Title="Anti Kill",Default=false,Callback=function(a8) enabled=a8 end}))
-D:Register("PickupItems",a1_tab:Toggle({Title="ดูดของ",Default=false,Callback=function(a9) ak=a9 end}))
-D:Register("กันชน",a1_tab:Toggle({Title="กันชน",Default=false,Callback=function(ba)
-    if not ba then return end
-    task.spawn(function()
-        while ba do
-            pcall(function() c.Remotes.Send:FireServer(1, "end_ragdoll_early") end)
-            task.wait(0.3)
-        end
-    end)
-end}))
-D:Register("ซ่อนชื่อ",a1_tab:Toggle({Title="ซ่อนชื่อ",Default=false,Callback=function(bb)
-    pcall(function()
-        local bc=a.LocalPlayer; local bd=bc.Character or bc.CharacterAdded:Wait()
-        local be=bd:WaitForChild("HumanoidRootPart"); local bf=be:FindFirstChild("CharacterBillboardGui")
-        if bf then local bg=bf:FindFirstChild("PlayerName") if bg and bg:IsA("TextLabel") then bg.Visible=not bb end end
-    end)
-end}))
-
-D:Register("เกิดใหม่ออโต้",a1_tab:Toggle({Title="เกิดใหม่ออโต้",Default=false,Callback=function(bc)
-    if not bc then return end
-    task.spawn(function()
-        while bc do
-            local bi=r.Character; local bj=bi and bi:FindFirstChildOfClass("Humanoid")
-            if bj and bj.Health<=0 then
-                task.wait(6)
-                if bc then pcall(function() c.Remotes.Send:FireServer(1, "death_screen_request_respawn") end) end
-            end
-            task.wait(0.5)
-        end
-    end)
-end}))
+-- โหลดสคริปต์ดำดินต่อท้าย
+loadstring(game:HttpGet("https://raw.githubusercontent.com/nextdidi7-boop/friendly-umbrella/refs/heads/main/Dive%20underground"))()
