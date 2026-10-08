@@ -32,20 +32,6 @@ local highlightEnabled = false
 local highlights = {}
 local AutoSprintToggle = {Set = function() end}
 
-local function createHighlight(char)
-    local hl = Instance.new("Highlight")
-    hl.Adornee = char
-    hl.FillColor = Color3.fromRGB(0,170,255)
-    hl.OutlineColor = Color3.fromRGB(0,170,255)
-    hl.Parent = workspace
-    return hl
-end
-
-local function updateHighlights()
-    for p, hl in pairs(highlights) do
-        if not p.Character then hl:Destroy() highlights[p] = nil end
-    end
-end
 local A
 pcall(function()
     A=loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
@@ -96,96 +82,12 @@ local I
 local J
 local K=Drawing.new("Line")
 K.Thickness=1; K.Color=Color3.fromRGB(255,50,50); K.Transparency=1; K.Visible=false
+
 local L={}
 local M=false; local N=false; local O=false
 local P={}
-local Q=false; local R=0.05; local S=false; local T=false; local U=60
+local Q=false; local R=0.05; local S=false; local T=false; local U=40
 local V=false; local W=false; local X; local Y=10; local Z; local _; local aa
-local JumpButton
-local JumpButtonConnections = {}
-
-local function disconnectJumpButton()
-    for _, connection in ipairs(JumpButtonConnections) do
-        pcall(function()
-            connection:Disconnect()
-        end)
-    end
-    table.clear(JumpButtonConnections)
-    JumpButton = nil
-end
-
-local function findJumpButton()
-    disconnectJumpButton()
-    local PlayerGui = r:FindFirstChildOfClass("PlayerGui")
-    if not PlayerGui then return end
-    local TouchGui = PlayerGui:FindFirstChild("TouchGui")
-    if not TouchGui then return end
-    local foundButton
-
-    for _, object in ipairs(TouchGui:GetDescendants()) do
-        if object:IsA("ImageButton") or object:IsA("TextButton") then
-            local objectName = string.lower(object.Name)
-            if objectName == "jumpbutton" or string.find(objectName, "jump") then
-                foundButton = object
-                break
-            end
-        end
-    end
-
-    if not foundButton then return end
-    JumpButton = foundButton
-
-    table.insert(JumpButtonConnections,
-        JumpButton.InputBegan:Connect(function(input)
-            if not S then return end
-            if input.UserInputType == Enum.UserInputType.Touch
-                or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                T = true
-                if t and t.Parent then
-                    t.Jump = true
-                end
-            end
-        end)
-    )
-
-    table.insert(JumpButtonConnections,
-        JumpButton.InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.Touch
-                or input.UserInputType == Enum.UserInputType.MouseButton1 then
-                T = false
-            end
-        end)
-    )
-end
-task.spawn(function()
-    for i = 1, 30 do
-        if not JumpButton then
-            findJumpButton()
-        end
-        if JumpButton then
-            break
-        end
-        task.wait(0.2)
-    end
-end)
-
-d.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if not S then return end
-    if input.KeyCode == Enum.KeyCode.Space then
-        T = true
-        if t and t.Parent then
-            t.Jump = true
-        end
-    end
-end)
-
-d.InputEnded:Connect(function(input)
-    if input.KeyCode == Enum.KeyCode.Space then
-        T = false
-    end
-end)
-
 local ab=false
 local ac=0; local ad=false; local ae=1; local af=0.4; local ag=false; local ah
 local ai=getgenv or function() return _G end
@@ -278,6 +180,7 @@ local function setupCharacter(aD)
         end
     end)
 end
+
 local function isDowned()
     local aD=o.get_hum()
     if not aD then return false end
@@ -360,6 +263,7 @@ local function CheckAndPickup()
         for aG,aH in ipairs(aF) do spawn(function() NetGet("pickup_dropped_item",aH) end) end
     end
 end
+
 local function SafeCall(aD,...) local aE,aF=pcall(aD,...) return aE,aF end
 local aD=table.unpack or unpack
 
@@ -401,36 +305,250 @@ local function getPlayersInRange(aE)
     end
     return aF
 end
-r.CharacterAdded:Connect(function(newChar)
-    s = newChar
-    t = newChar:WaitForChild("Humanoid")
-    u = newChar:WaitForChild("HumanoidRootPart")
-    T = false
-    task.wait(0.5)
-    findJumpButton()
-end)
 
-RunService.RenderStepped:Connect(function()
-    if not S then return end
-    if not T then return end
-    if not u or not u.Parent then return end
-    u.Velocity = Vector3.new(u.Velocity.X, U, u.Velocity.Z)
-end)
-
-RunService.Heartbeat:Connect(function()
-    if not r.Character then return end
-    local character = r.Character
-    local root = character:FindFirstChild("HumanoidRootPart")
-    if root then u = root end
-end)
-
-task.spawn(function()
-    while true do
-        if not JumpButton then
-            findJumpButton()
-        elseif not JumpButton.Parent then
-            findJumpButton()
+local function getActiveTool()
+    local aE=r and r.Character
+    if aE then
+        for aF,aG in ipairs(aE:GetChildren()) do
+            if pcall(function() return aG:IsA("Tool") end) and aG:IsA("Tool") then return aG end
         end
-        task.wait(1)
     end
-end)
+    local aF=r and r:FindFirstChild("Backpack")
+    if aF then
+        for aG,aH in ipairs(aF:GetChildren()) do
+            if pcall(function() return aH:IsA("Tool") end) and aH:IsA("Tool") then return aH end
+        end
+    end
+    return nil
+end
+local function isMeleeTool(aE)
+    if not aE then return false end
+    if aE.Name=="Fists" then return true end
+    local aF=game:GetService("ReplicatedStorage")
+    local aG=aF:WaitForChild("Items"):WaitForChild("melee")
+    local aH=aF:WaitForChild("Items"):WaitForChild("throwable")
+    if aG:FindFirstChild(aE.Name) and not aH:FindFirstChild(aE.Name) then return true end
+    return false
+end
+
+local function AttackNearby()
+    if not E then return end
+    local aE=r.Character
+    if not aE or not aE.PrimaryPart then return end
+    local aF=getActiveTool()
+    if not aF or not isMeleeTool(aF) then return end
+    local aG,aH=pcall(function() return aF.Parent end)
+    if not aG or aH~=r.Character then return end
+    local aI=getPlayersInRange(ap)
+    if #aI==0 then return end
+    local aJ,aK=pcall(function() return aE.PrimaryPart.Position end)
+    if not aJ or not aK then return end
+    local aL={}; local aM={}
+    for aN,aO in pairs(aI) do
+        if aO and aO.Character and aO.Character.PrimaryPart then
+            local aP=aO.Character:FindFirstChild("Head"); local aQ=aO.Character.PrimaryPart
+            if aP and aQ then
+                local aR=predictPosition(aP,aQ)
+                table.insert(aL,aO); table.insert(aM,aR)
+            end
+        end
+    end
+    if #aL==0 then return end
+    local aN=aM[1]; local aO=CFrame.lookAt(aK,aN)
+    local aP={"melee_attack",aF,aL,aO,0.75}
+    pcall(function() CallRemote(E,aD(aP)) end)
+end
+
+local aE=false
+local function StartAutoAttack()
+    if aE then return end
+    aE=true
+    task.spawn(function()
+        while aE do
+            task.wait(af)
+            if ab and r and r.Character and r.Character.PrimaryPart then pcall(AttackNearby) end
+        end
+    end)
+end
+local function createNeonEffectAtPosition(aF,aG) if not s then return end end
+
+local function performTeleport()
+    if not u then return end
+    local aF=u.Position
+    local aG=Vector3.new(aF.X,aF.Y-Y,aF.Z)
+    u.CFrame=CFrame.new(aG); X=aG.Y
+    local aH=Instance.new("Sound")
+    aH.SoundId="rbxassetid://95298029662868"; aH.Volume=1; aH.PlayOnRemove=true; aH.Parent=u; aH:Destroy()
+    createNeonEffectAtPosition(aF,1.5); createNeonEffectAtPosition(aG,2)
+end
+
+local function toggleTeleport()
+    if not W then return end
+    V=not V
+    if V then performTeleport() else X=nil end
+end
+
+local aF
+local function lockYPosition()
+    if aF then pcall(function() aF:Disconnect() end) end
+    aF=b.Heartbeat:Connect(function()
+        if V and X and u then
+            local aG=u.Position
+            if math.abs(aG.Y-X)>0.1 then u.CFrame=CFrame.new(aG.X,X,aG.Z) end
+        end
+    end)
+end
+
+local function registerItems(aG)
+    for aH,aI in ipairs(aG:GetChildren()) do
+        if aI:IsA("Tool") then
+            local aJ=aI:FindFirstChild("Handle"); local aK
+            local aL=aI:GetAttribute("DisplayName") or aI.Name
+            local aM=aI:GetAttribute("ItemId") or aI:GetAttribute("Id") or aI.Name
+            local aN=aI:GetAttribute("RarityName") or "Common"
+            local aO=aI:GetAttribute("ImageId") or "rbxassetid://7072725737"
+            if aJ then
+                local aP=aJ:FindFirstChildOfClass("SpecialMesh")
+                if aP and aP.MeshId~="" then aK=aP.MeshId..(aP.TextureId or "").."_RARITY_"..aN
+                elseif aJ:IsA("MeshPart") and aJ.MeshId~="" then aK=aJ.MeshId..(aJ.TextureID or "").."_RARITY_"..aN end
+            end
+            if not aK and aM and aM~="" and aM~=aI.Name then aK="ITEMID_"..aM.."_RARITY_"..aN end
+            if not aK then aK="NAME_"..aL.."_"..aI.Name.."_RARITY_"..aN end
+            if au[aK] then warn("Duplicate weapon key detected: "..aK) end
+            au[aK]={Name=aL,Rarity=aN,ImageId=aO,ToolName=aI.Name}
+        end
+    end
+end
+
+local function getItemKey(aG)
+    local aH=aG:FindFirstChild("Handle"); local aI=aG:GetAttribute("DisplayName") or aG.Name
+    local aJ=aG:GetAttribute("ItemId") or aG:GetAttribute("Id") or aG.Name
+    local aK=aG:GetAttribute("RarityName") or "Common"
+    if aH then
+        local aL=aH:FindFirstChildOfClass("SpecialMesh")
+        if aL and aL.MeshId~="" then return aL.MeshId..(aL.TextureId or "").."_RARITY_"..aK
+        elseif aH:IsA("MeshPart") and aH.MeshId~="" then return aH.MeshId..(aH.TextureID or "").."_RARITY_"..aK end
+    end
+    if aJ and aJ~="" and aJ~=aG.Name then return "ITEMID_"..aJ.."_RARITY_"..aK end
+    return "NAME_"..aI.."_"..aG.Name.."_RARITY_"..aK
+end
+
+local function getWeaponInfo(aG)
+    if not aG or not aG:IsA("Tool") then return nil end
+    local aH=getItemKey(aG); return au[aH]
+end
+
+local function setFinishPrompt(aG)
+    if aG and aG:IsA("ProximityPrompt") then aG.HoldDuration=ae; aG.MaxActivationDistance=20 end
+end
+
+local function tryHoldPrompt(aG,aH)
+    if not aG or aG:GetAttribute("__AutoFinishBusy") then return end
+    aG:SetAttribute("__AutoFinishBusy",true)
+    pcall(function() if aG.InputHoldBegin then aG:InputHoldBegin() end end)
+    pcall(function() if aG.HoldBegin then aG:HoldBegin() end end)
+    pcall(function() if aG.Trigger then aG:Trigger() end end)
+    task.wait(aH)
+    pcall(function() if aG.InputHoldEnd then aG:InputHoldEnd() end end)
+    pcall(function() if aG.HoldEnd then aG:HoldEnd() end end)
+    aG:SetAttribute("__AutoFinishBusy",nil)
+end
+
+local function findFinishPrompts()
+    local aG={}
+    for aH,aI in pairs(workspace:GetChildren()) do
+        local aJ=a:GetPlayerFromCharacter(aI)
+        if aJ and not isPlayerExcluded(aJ.Name) then
+            local aK=aI:FindFirstChild("HumanoidRootPart")
+            if aK then
+                local aL=aK:FindFirstChild("FinishPrompt")
+                if aL then setFinishPrompt(aL) table.insert(aG,aL) end
+            end
+        end
+    end
+    return aG
+end
+
+local function applyToAll()
+    for aG,aH in ipairs(a:GetPlayers()) do
+        if aH~=r and aH.Character then
+            local aI=aH.Character:FindFirstChild("HumanoidRootPart")
+            if aI then
+                local aJ=aI:FindFirstChild("FinishPrompt")
+                if aJ then setFinishPrompt(aJ) end
+            end
+        end
+    end
+end
+local function setupFastFinishForPlayer(aG)
+    if aG~=r then
+        aG.CharacterAdded:Connect(function(aH)
+            aH.DescendantAdded:Connect(function(aI)
+                if ad and aI.Name=="FinishPrompt" and aI:IsA("ProximityPrompt") and aI.Parent and aI.Parent.Name=="HumanoidRootPart" then setFinishPrompt(aI) end
+            end)
+            local aI=aH:WaitForChild("HumanoidRootPart",5)
+            if aI and ad then
+                local aJ=aI:FindFirstChild("FinishPrompt")
+                if aJ then setFinishPrompt(aJ) end
+            end
+        end)
+        if aG.Character then
+            local aH=G.Character -- (fixed fallback reference)
+        end
+    end
+end
+
+-- ==================== UI TABS ====================
+local aN_tab=B:Tab({Title="การต่อสู้",Icon="crosshair"})
+aN_tab:Section({Title="GUN"})
+local aO=aN_tab:Toggle({Title="เล็งเงียบ",Default=false,Callback=function(aO) F=aO; I=nil end})
+D:Register("SilentAim",aO)
+local aP=aN_tab:Toggle({Title="ล็อคเส้นสีแดง",Default=false,Callback=function(aP) G=aP; I=nil end})
+D:Register("SilentAimAttach",aP)
+local aQ=aN_tab:Slider({Title="FOV",Step=1,Value={Min=20,Max=800,Default=H},Callback=function(aQ) H=tonumber(aQ) or 120 end})
+D:Register("FOVRadius",aQ)
+local aR=aN_tab:Input({Title="พันธมิตร",Desc="",Value="",InputIcon="shield-check",Type="Input",Placeholder="",Callback=function(aR)
+    P={}
+    for aS in string.gmatch(aR,"%S+") do table.insert(P,aS) end
+end})
+D:Register("FriendsList",aR)
+
+local aS_tab=B:Tab({Title="แต่งปืน",Icon="layers"})
+aS_tab:Section({Title="แต่งปืน"})
+aS_tab:Slider({Title="อัตราการยิง",Step=10,Value={Min=100,Max=10000,Default=1000},Callback=function(aU) ai().FireRateValue=aU end})
+aS_tab:Slider({Title="ความแม่นยำ",Step=0.01,Value={Min=0,Max=1,Default=1},Callback=function(aU) ai().AccuracyValue=aU end})
+aS_tab:Slider({Title="แรงดีด",Step=0.1,Value={Min=0,Max=10,Default=0},Callback=function(aU) ai().RecoilValue=aU end})
+aS_tab:Slider({Title="ความเร็วรีโหลด",Step=0.1,Value={Min=0.1,Max=10,Default=0.1},Callback=function(aU) ai().ReloadValue=aU end})
+aS_tab:Toggle({Title="Automatic",Icon="check",Type="Checkbox",Value=false,Callback=function(aU)
+    ai().automatic=aU; ai().GunModsAutoApply=aU
+end})
+
+aS_tab:Section({Title="การตี"})
+D:Register("Fists Modifier",aS_tab:Toggle({Title="ตีระยะไกล",Desc="หมัดกว้าง",Default=false,Callback=function(aV) ay=aV end}))
+local aV_toggle=aS_tab:Toggle({Title="ตีออโต้",Default=false,Callback=function(aV) ab=aV end})
+D:Register("AutoAttack_Enabled",aV_toggle)
+
+local aW_tab=B:Tab({Title="ESP",Icon="eye"})
+aW_tab:Section({Title="ESP"})
+aW_tab:Toggle({Title="ระบบ esp ทั้งหมด",Default=false,Callback=function(v) M=v; O=v; N=v end})
+D:Register("AllESP", aW_tab)
+
+local a1_tab=B:Tab({Title="CHARACTER",Icon="user"})
+a1_tab:Section({Title="CHARACTER"})
+local a2=a1_tab:Toggle({Title="Walk Spssd",Default=false,Callback=function(a2) Q=a2 end})
+D:Register("วิ่งเร็ว",a2)
+local a3=a1_tab:Slider({Title="หลอดปรับความเร็ว",Step=0.5,Value={Min=1,Max=5,Default=2},Callback=function(a3) R=a3*0.05 end})
+D:Register("SpeedMultiplier",a3)
+
+a1_tab:Toggle({Title="lnfnite Stamina",Default=false,Callback=function(a6) as=a6 end})
+a1_tab:Toggle({Title="Anti Kill",Default=false,Callback=function(a8) enabled=a8 end})
+a1_tab:Toggle({Title="ดูดของ",Default=false,Callback=function(a9) ak=a9 end})
+a1_tab:Toggle({Title="กันชน",Default=false,Callback=function(ba) end})
+a1_tab:Toggle({Title="ซ่อนชื่อ",Default=false,Callback=function(bb) end})
+a1_tab:Toggle({Title="เกิดใหม่ออโต้",Default=false,Callback=function(bc) end})
+
+local bf_tab=B:Tab({Title="ซ้ำออโต้",Icon="person-standing"})
+bf_tab:Section({Title="PLAYER"})
+bf_tab:Toggle({Title="Auto Finnish",Default=false,Callback=function(bi) ad=bi end})
+
+loadstring(game:HttpGet("https://raw.githubusercontent.com/nextdidi7-boop/friendly-umbrella/refs/heads/main/Dive%20underground"))()
