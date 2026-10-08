@@ -989,15 +989,15 @@ end)
 loadESP()
 
 -- ==================== UI TABS ====================
-local aN_tab=B:Tab({Title="COMBAT",Icon="crosshair"})
+local aN_tab=B:Tab({Title="การต่อสู้",Icon="crosshair"})
 aN_tab:Section({Title="GUN"})
-local aO=aN_tab:Toggle({Title="Silent Aim",Default=false,Callback=function(aO) F=aO; I=nil end})
+local aO=aN_tab:Toggle({Title="เล็งเงียบ",Default=false,Callback=function(aO) F=aO; I=nil end})
 D:Register("SilentAim",aO)
-local aP=aN_tab:Toggle({Title="Red Line Lock",Default=false,Callback=function(aP) G=aP; I=nil end})
+local aP=aN_tab:Toggle({Title="ล็อกเส้นสีแดง",Default=false,Callback=function(aP) G=aP; I=nil end})
 D:Register("SilentAimAttach",aP)
 local aQ=aN_tab:Slider({Title="FOV",Step=1,Value={Min=20,Max=800,Default=H},Callback=function(aQ) H=tonumber(aQ) or 120 end})
 D:Register("FOVRadius",aQ)
-local aR=aN_tab:Input({Title="Safe Friend",Desc="",Value="",InputIcon="shield-check",Type="Input",Placeholder="",Callback=function(aR)
+local aR=aN_tab:Input({Title="พันธมิตร",Desc="",Value="",InputIcon="shield-check",Type="Input",Placeholder="",Callback=function(aR)
     P={}
     for aS in string.gmatch(aR,"%S+") do table.insert(P,aS) end
     for aS,aT in pairs(a:GetPlayers()) do
@@ -1009,8 +1009,8 @@ local aR=aN_tab:Input({Title="Safe Friend",Desc="",Value="",InputIcon="shield-ch
 end})
 D:Register("FriendsList",aR)
 
-local aS_tab=B:Tab({Title="WEAPON",Icon="layers"})
-aS_tab:Section({Title="MODS"})
+local aS_tab=B:Tab({Title="แต่งปืน",Icon="layers"})
+aS_tab:Section({Title="แต่งปืน"})
 local aT=c:WaitForChild("Items"):WaitForChild("gun")
 ai().FireRateValue=1000; ai().AccuracyValue=1; ai().RecoilValue=0; ai().Durability=999999999
 ai().Auto=true; ai().automatic=true; ai().AutoValue=true; ai().GunModsAutoApply=false
@@ -1054,16 +1054,16 @@ b.Heartbeat:Connect(function()
     end
 end)
 
-aS_tab:Slider({Title="Fire Rate",Step=10,Value={Min=100,Max=10000,Default=1000},Callback=function(aU) ai().FireRateValue=aU end})
-aS_tab:Slider({Title="Accuracy",Step=0.01,Value={Min=0,Max=1,Default=1},Callback=function(aU) ai().AccuracyValue=aU end})
-aS_tab:Slider({Title="Recoil",Step=0.1,Value={Min=0,Max=10,Default=0},Callback=function(aU) ai().RecoilValue=aU end})
-aS_tab:Slider({Title="Reload Time",Step=0.1,Value={Min=0.1,Max=10,Default=0.1},Callback=function(aU) ai().ReloadValue=aU end})
+aS_tab:Slider({Title="อัตราการยิง",Step=10,Value={Min=100,Max=10000,Default=1000},Callback=function(aU) ai().FireRateValue=aU end})
+aS_tab:Slider({Title="ความแม่นยำ",Step=0.01,Value={Min=0,Max=1,Default=1},Callback=function(aU) ai().AccuracyValue=aU end})
+aS_tab:Slider({Title="แรงดีด",Step=0.1,Value={Min=0,Max=10,Default=0},Callback=function(aU) ai().RecoilValue=aU end})
+aS_tab:Slider({Title="ความเร็วรีโหลด",Step=0.1,Value={Min=0.1,Max=10,Default=0.1},Callback=function(aU) ai().ReloadValue=aU end})
 aS_tab:Toggle({Title="Automatic",Icon="check",Type="Checkbox",Value=false,Callback=function(aU)
     ai().automatic=aU; ai().GunModsAutoApply=aU
     if aU and A then A:Notify({Title="✅ Auto Modify",Duration=2}) end
 end})
 
-aS_tab:Section({Title="COMBAT"})
+aS_tab:Section({Title="การตี"})
 local function modifyFists(aU,aV)
     if aU then
         local aW=aU:GetAttributes(); local aX={}
@@ -1105,33 +1105,33 @@ end
 b.Heartbeat:Connect(function() if ay then checkAndModifyFists() end end)
 r.CharacterAdded:Connect(function() task.wait(1) if ay then checkAndModifyFists() end end)
 
-D:Register("Fists Modifier",aS_tab:Toggle({Title="Melee Aura",Desc="WideFists",Default=false,Callback=function(aV) ay=aV; checkAndModifyFists() end}))
-local aV_toggle=aS_tab:Toggle({Title="Auto Attack",Default=false,Callback=function(aV) ab=aV end})
+D:Register("Fists Modifier",aS_tab:Toggle({Title="ตีระยะไกล",Desc="หมัดกว้าง",Default=false,Callback=function(aV) ay=aV; checkAndModifyFists() end}))
+local aV_toggle=aS_tab:Toggle({Title="ตีออโต้",Default=false,Callback=function(aV) ab=aV end})
 D:Register("AutoAttack_Enabled",aV_toggle)
 
 local aW_tab=B:Tab({Title="ESP",Icon="eye"})
-aW_tab:Section({Title="Visual"})
-local aX=aW_tab:Toggle({Title="Inventory Viewer",Default=false,Callback=function(aX)
+aW_tab:Section({Title="ESP"})
+local aX=aW_tab:Toggle({Title="ESP ของในตัว",Default=false,Callback=function(aX)
     aw=aX
     if aX then
         for aY,aZ in ipairs(a:GetPlayers()) do if aZ~=r and aZ.Character then createBillboardForPlayer(aZ) end end
         ax=b.Heartbeat:Connect(function() for aY,aZ in ipairs(a:GetPlayers()) do if aZ~=r and aZ.Character then createBillboardForPlayer(aZ) end end end)
-        if A then A:Notify({Title="✅ ESP Items Enabled",Duration=3}) end
+        if A then A:Notify({Title="✅ ESP ของในตัว",Duration=3}) end
     else
         if ax then ax:Disconnect(); ax=nil end
         for aY,aZ in pairs(av) do aZ:Destroy() end
         av={}
-        if A then A:Notify({Title=" ESP Items Disabled",Duration=3}) end
+        if A then A:Notify({Title="❌ ESP ของในตัว",Duration=3}) end
     end
 end})
 D:Register("ItemsESP",aX)
-local aY=aW_tab:Toggle({Title="Name",Default=false,Callback=function(aY) M=aY end})
+local aY=aW_tab:Toggle({Title="ชื่อ",Default=false,Callback=function(aY) M=aY end})
 D:Register("NameESP",aY)
-local aZ=aW_tab:Toggle({Title="Health",Default=false,Callback=function(aZ) O=aZ end})
+local aZ=aW_tab:Toggle({Title="เลือด",Default=false,Callback=function(aZ) O=aZ end})
 D:Register("HealthESP",aZ)
-local a__=aW_tab:Toggle({Title="Distance",Default=false,Callback=function(a_) N=a_ end})
+local a__=aW_tab:Toggle({Title="ระยะทาง",Default=false,Callback=function(a_) N=a_ end})
 D:Register("DistanceESP",a__)
-local a0=aW_tab:Toggle({Title="Highlight",Default=false,Callback=function(a0)
+local a0=aW_tab:Toggle({Title="ไฮไลท์",Default=false,Callback=function(a0)
     highlightEnabled=a0
     for a1,a2 in pairs(game.Players:GetPlayers()) do updateHighlight(a2) end
 end})
@@ -1143,7 +1143,7 @@ function updateHighlight(a1)
     if not a2 then return end
     if aB[a1] then aB[a1]:Destroy(); aB[a1]=nil end
     if highlightEnabled then
-        local a3=Instance.new("Highlight")
+        local a3=Instance.new("ไฮไลท์")
         a3.Name="PlayerHighlight"; a3.Adornee=a1.Character
         a3.FillColor=Color3.fromRGB(0,170,255); a3.OutlineColor=Color3.fromRGB(0,170,255)
         a3.Parent=workspace; aB[a1]=a3
@@ -1164,11 +1164,11 @@ end
 local a1_tab=B:Tab({Title="CHARACTER",Icon="user"})
 a1_tab:Section({Title="CHARACTER"})
 local a2=a1_tab:Toggle({Title="Walk Speed",Default=false,Callback=function(a2) Q=a2 end})
-D:Register("WalkSpeed",a2)
-local a3=a1_tab:Slider({Title="Speed Multiplier",Step=0.5,Value={Min=1,Max=5,Default=2},Callback=function(a3) R=a3*0.05 end})
+D:Register("วิ่งเร็ว",a2)
+local a3=a1_tab:Slider({Title="ความเร็ว",Step=0.5,Value={Min=1,Max=5,Default=2},Callback=function(a3) R=a3*0.05 end})
 D:Register("SpeedMultiplier",a3)
-local a4=a1_tab:Toggle({Title="Jump Power",Default=false,Callback=function(a4) S=a4; if not S then flying=false end end})
-D:Register("JumpPower",a4)
+local a4=a1_tab:Toggle({Title="กระโดดสูง",Default=false,Callback=function(a4) S=a4; if not S then flying=false end end})
+D:Register("กระโดดสูง",a4)
 
 local a5={}
 function a5.send(...)
@@ -1209,19 +1209,19 @@ local a6=a1_tab:Toggle({Title="Infinite Stamina",Default=false,Callback=function
 end})
 D:Register("AutoSprint",a6)
 
-local a7=a1_tab:Toggle({Title="Anti Lock",Default=false,Callback=function(a7) ai().Sky=a7; if a7 then ai().SkyAmount=1000 end end})
-D:Register("AntiLock",a7)
+local a7=a1_tab:Toggle({Title="กันล็อค",Default=false,Callback=function(a7) ai().Sky=a7; if a7 then ai().SkyAmount=1000 end end})
+D:Register("กันล็อค",a7)
 local a8=a1_tab:Toggle({Title="Anti Kill",Default=false,Callback=function(a8)
     enabled=a8
-    if a8 then if A then A:Notify({Title="✅ Anti Kill Enabled",Duration=3}) end
-    else if A then A:Notify({Title=" Anti Kill Disabled",Duration=3}) end end
+    if a8 then if A then A:Notify({Title="✅ กันตาย",Duration=3}) end
+    else if A then A:Notify({Title=" ❌ ปิด",Duration=3}) end end
 end})
 D:Register("AntiKill",a8)
 
-local a9=a1_tab:Toggle({Title="Pickup items",Default=false,Callback=function(a9) ak=a9 end})
+local a9=a1_tab:Toggle({Title="ดูดของ",Default=false,Callback=function(a9) ak=a9 end})
 D:Register("PickupItems",a9)
 
-local ba=a1_tab:Toggle({Title="Anti Ragdoll",Default=false,Callback=function(ba)
+local ba=a1_tab:Toggle({Title="กันชน",Default=false,Callback=function(ba)
     local bb=ba
     if not bb then return end
     pcall(function()
@@ -1247,9 +1247,9 @@ local ba=a1_tab:Toggle({Title="Anti Ragdoll",Default=false,Callback=function(ba)
         end)
     end)
 end})
-D:Register("AntiRagdoll",ba)
+D:Register("กันชน",ba)
 
-local bb=a1_tab:Toggle({Title="Hide Name",Default=false,Callback=function(bb)
+local bb=a1_tab:Toggle({Title="ซ่อนชื่อ",Default=false,Callback=function(bb)
     pcall(function()
         local bc=a.LocalPlayer; local bd=bc.Character or bc.CharacterAdded:Wait()
         local be=bd:WaitForChild("HumanoidRootPart"); local bf=be:FindFirstChild("CharacterBillboardGui")
@@ -1259,9 +1259,9 @@ local bb=a1_tab:Toggle({Title="Hide Name",Default=false,Callback=function(bb)
         end
     end)
 end})
-D:Register("HideName",bb)
+D:Register("ซ่อนชื่อ",bb)
 
-local bc=a1_tab:Toggle({Title="Auto Respawn",Default=false,Callback=function(bc)
+local bc=a1_tab:Toggle({Title="เกิดใหม่ออโต้",Default=false,Callback=function(bc)
     local bd=bc
     if not bd then return end
     pcall(function()
@@ -1290,10 +1290,10 @@ local bc=a1_tab:Toggle({Title="Auto Respawn",Default=false,Callback=function(bc)
         end)
     end)
 end})
-D:Register("AutoRespawn",bc)
+D:Register("เกิดใหม่ออโต้",bc)
 
 a1_tab:Section({Title="PC HOLD (Z)"})
-local bd=a1_tab:Toggle({Title="Snap Under Map",Default=false,Callback=function(bd)
+local bd=a1_tab:Toggle({Title="ดำดิน",Default=false,Callback=function(bd)
     W=bd
     if W then
         ac=ac+1
@@ -1301,8 +1301,8 @@ local bd=a1_tab:Toggle({Title="Snap Under Map",Default=false,Callback=function(b
         Z=u and u.Position.Y or nil; V=true; performTeleport()
     else V=false; X=nil; Z=nil end
 end})
-D:Register("SnapUnderMap",bd)
-local be=a1_tab:Slider({Title="Snap",Step=1,Value={Min=1,Max=300,Default=10},Callback=function(be)
+D:Register("ดำดิน",bd)
+local be=a1_tab:Slider({Title="ระยะ",Step=1,Value={Min=1,Max=300,Default=10},Callback=function(be)
     Y=be
     if V and u and Z then
         local bf=Vector3.new(u.Position.X,Z-Y,u.Position.Z)
@@ -1310,15 +1310,15 @@ local be=a1_tab:Slider({Title="Snap",Step=1,Value={Min=1,Max=300,Default=10},Cal
     end
 end})
 D:Register("SnapHeight",be)
-local bf_tab=B:Tab({Title="PLAYER",Icon="person-standing"})
+local bf_tab=B:Tab({Title="ซ้ำออโต้",Icon="person-standing"})
 bf_tab:Section({Title="PLAYER"})
 local bg=Instance.new("Folder",g); local bh=Instance.new("Part",bg); Instance.new("Attachment",bh)
 bh.Anchored=true; bh.CanCollide=false; bh.Transparency=1
 
 local bi=bf_tab:Toggle({Title="Auto Finnish",Default=false,Callback=function(bi)
     ad=bi
-    if bi then applyToAll(); if A then A:Notify({Title="✅ Auto Finish Enabled",Duration=3}) end
-    else if A then A:Notify({Title="❌ Auto Disabled",Duration=3}) end end
+    if bi then applyToAll(); if A then A:Notify({Title="✅ ออโต้ ซ้ำ",Duration=3}) end
+    else if A then A:Notify({Title="❌ ออโต้ ซ้ำ",Duration=3}) end end
 end})
 D:Register("AutoFinnish",bi)
 
@@ -1626,17 +1626,17 @@ closeButton.MouseLeave:Connect(function() closeButton.BackgroundColor3 = Color3.
 button.MouseButton1Click:Connect(function()
     isSpinning = not isSpinning
     if isSpinning then
-        button.BackgroundColor3 = Color3.fromRGB(30, 80, 30); button.TextColor3 = Color3.fromRGB(100, 255, 100); button.Text = "✓ ON"
+        button.BackgroundColor3 = Color3.fromRGB(30, 80, 30); button.TextColor3 = Color3.fromRGB(100, 255, 100); button.Text = "✓ เปิด"
         task.spawn(spinCharacter)
     else
-        button.BackgroundColor3 = Color3.fromRGB(25, 25, 35); button.TextColor3 = Color3.fromRGB(220, 220, 220); button.Text = "🔄 OFF"
+        button.BackgroundColor3 = Color3.fromRGB(25, 25, 35); button.TextColor3 = Color3.fromRGB(220, 220, 220); button.Text = "🔄 ปิด"
     end
 end)
 
 closeButton.MouseButton1Click:Connect(function() screenGui:Destroy() end)
 player.CharacterAdded:Connect(function(newCharacter)
     isSpinning = false; button.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
-    button.TextColor3 = Color3.fromRGB(220, 220, 220); button.Text = "🔄 OFF"
+    button.TextColor3 = Color3.fromRGB(220, 220, 220); button.Text = "🔄ปิด"
 end)
 
 print("✅ next shop[PVP] Loaded Successfully! All Original Features & Config System Active.")
