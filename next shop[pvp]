@@ -30,7 +30,6 @@ local SelectedAimPart = "Head"
 local enabled = false
 local highlightEnabled = false
 local highlights = {}
-local AutoSprintToggle = {Set = function() end}
 
 local A
 pcall(function()
@@ -148,6 +147,7 @@ local function getClosestTarget()
     end
     return aD
 end
+
 local function predictPosition(aD,aE)
     if not aD then return Vector3.zero end
     local aF=(getPing and getPing()) or (game:GetService("Stats").Network.ServerStatsItem["Data Ping"]:GetValue()/1000)
@@ -321,6 +321,7 @@ local function getActiveTool()
     end
     return nil
 end
+
 local function isMeleeTool(aE)
     if not aE then return false end
     if aE.Name=="Fists" then return true end
@@ -370,74 +371,6 @@ local function StartAutoAttack()
         end
     end)
 end
-local function createNeonEffectAtPosition(aF,aG) if not s then return end end
-
-local function performTeleport()
-    if not u then return end
-    local aF=u.Position
-    local aG=Vector3.new(aF.X,aF.Y-Y,aF.Z)
-    u.CFrame=CFrame.new(aG); X=aG.Y
-    local aH=Instance.new("Sound")
-    aH.SoundId="rbxassetid://95298029662868"; aH.Volume=1; aH.PlayOnRemove=true; aH.Parent=u; aH:Destroy()
-    createNeonEffectAtPosition(aF,1.5); createNeonEffectAtPosition(aG,2)
-end
-
-local function toggleTeleport()
-    if not W then return end
-    V=not V
-    if V then performTeleport() else X=nil end
-end
-
-local aF
-local function lockYPosition()
-    if aF then pcall(function() aF:Disconnect() end) end
-    aF=b.Heartbeat:Connect(function()
-        if V and X and u then
-            local aG=u.Position
-            if math.abs(aG.Y-X)>0.1 then u.CFrame=CFrame.new(aG.X,X,aG.Z) end
-        end
-    end)
-end
-
-local function registerItems(aG)
-    for aH,aI in ipairs(aG:GetChildren()) do
-        if aI:IsA("Tool") then
-            local aJ=aI:FindFirstChild("Handle"); local aK
-            local aL=aI:GetAttribute("DisplayName") or aI.Name
-            local aM=aI:GetAttribute("ItemId") or aI:GetAttribute("Id") or aI.Name
-            local aN=aI:GetAttribute("RarityName") or "Common"
-            local aO=aI:GetAttribute("ImageId") or "rbxassetid://7072725737"
-            if aJ then
-                local aP=aJ:FindFirstChildOfClass("SpecialMesh")
-                if aP and aP.MeshId~="" then aK=aP.MeshId..(aP.TextureId or "").."_RARITY_"..aN
-                elseif aJ:IsA("MeshPart") and aJ.MeshId~="" then aK=aJ.MeshId..(aJ.TextureID or "").."_RARITY_"..aN end
-            end
-            if not aK and aM and aM~="" and aM~=aI.Name then aK="ITEMID_"..aM.."_RARITY_"..aN end
-            if not aK then aK="NAME_"..aL.."_"..aI.Name.."_RARITY_"..aN end
-            if au[aK] then warn("Duplicate weapon key detected: "..aK) end
-            au[aK]={Name=aL,Rarity=aN,ImageId=aO,ToolName=aI.Name}
-        end
-    end
-end
-
-local function getItemKey(aG)
-    local aH=aG:FindFirstChild("Handle"); local aI=aG:GetAttribute("DisplayName") or aG.Name
-    local aJ=aG:GetAttribute("ItemId") or aG:GetAttribute("Id") or aG.Name
-    local aK=aG:GetAttribute("RarityName") or "Common"
-    if aH then
-        local aL=aH:FindFirstChildOfClass("SpecialMesh")
-        if aL and aL.MeshId~="" then return aL.MeshId..(aL.TextureId or "").."_RARITY_"..aK
-        elseif aH:IsA("MeshPart") and aH.MeshId~="" then return aH.MeshId..(aH.TextureID or "").."_RARITY_"..aK end
-    end
-    if aJ and aJ~="" and aJ~=aG.Name then return "ITEMID_"..aJ.."_RARITY_"..aK end
-    return "NAME_"..aI.."_"..aG.Name.."_RARITY_"..aK
-end
-
-local function getWeaponInfo(aG)
-    if not aG or not aG:IsA("Tool") then return nil end
-    local aH=getItemKey(aG); return au[aH]
-end
-
 local function setFinishPrompt(aG)
     if aG and aG:IsA("ProximityPrompt") then aG.HoldDuration=ae; aG.MaxActivationDistance=20 end
 end
@@ -480,41 +413,77 @@ local function applyToAll()
         end
     end
 end
-local function setupFastFinishForPlayer(aG)
-    if aG~=r then
-        aG.CharacterAdded:Connect(function(aH)
-            aH.DescendantAdded:Connect(function(aI)
-                if ad and aI.Name=="FinishPrompt" and aI:IsA("ProximityPrompt") and aI.Parent and aI.Parent.Name=="HumanoidRootPart" then setFinishPrompt(aI) end
-            end)
-            local aI=aH:WaitForChild("HumanoidRootPart",5)
-            if aI and ad then
-                local aJ=aI:FindFirstChild("FinishPrompt")
-                if aJ then setFinishPrompt(aJ) end
-            end
-        end)
-        if aG.Character then
-            local aH=G.Character -- (fixed fallback reference)
+
+local function createESP(aG)
+    if L[aG] then return end
+    local aH=Drawing.new("Text")
+    aH.Size=16; aH.Center=true; aH.Outline=true; aH.Color=isPlayerExcluded(aG.Name) and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,255,255); aH.Font=4
+    local aI=Drawing.new("Text")
+    aI.Size=14; aI.Center=true; aI.Outline=true; aI.Color=Color3.fromRGB(255,255,255); aI.Font=4
+    local aJ=Drawing.new("Square")
+    aJ.Filled=false; aJ.Thickness=1; aJ.Color=Color3.fromRGB(0,0,0); aJ.Transparency=0.9; aJ.Visible=false
+    local aK=Drawing.new("Square")
+    aK.Filled=true; aK.Transparency=0.9; aK.Visible=false
+    local aL={aH,aI,aJ,aK}
+    local aM=b.RenderStepped:Connect(function()
+        if not aG or not aG.Character or not aG.Character:FindFirstChild("HumanoidRootPart") then
+            for aM,aN in pairs(aL) do aN.Visible=false end
+            return
         end
-    end
+        local aM=aG.Character.HumanoidRootPart
+        local aN=aG.Character:FindFirstChild("Humanoid")
+        local aO=0
+        if r.Character and r.Character:FindFirstChild("HumanoidRootPart") then aO=(aM.Position-r.Character.HumanoidRootPart.Position).Magnitude end
+        local aP,aQ=y:WorldToViewportPoint(aM.Position)
+        if not aQ or aP.Z<=0 then
+            for aR,aS in pairs(aL) do aS.Visible=false end
+            return
+        end
+        local aR=aP.X; local aS=aP.Y-15
+        if O and aN and aN.Health>0 then
+            local aT=aN.Health/(aN.MaxHealth>0 and aN.MaxHealth or 1)
+            local aU=4; local aV=60; local aW=aR-aV/2
+            aJ.Position=Vector2.new(aW,aS-aU-2); aJ.Size=Vector2.new(aV,aU); aJ.Visible=true
+            aK.Position=Vector2.new(aW,aS-aU-2); aK.Size=Vector2.new(aV*aT,aU); aK.Color=Color3.fromHSV(aT*0.333,0.8,0.9); aK.Visible=true
+            aS=aS-aU-6
+        else
+            aJ.Visible=false; aK.Visible=false
+        end
+        if M then
+            local aT,aU=14,42; local aV=math.clamp(aO/50,0,1); local aW=aU-(aU-aT)*aV
+            aH.Text=aG.Name; aH.Size=math.floor(aW); aH.Color=isPlayerExcluded(aG.Name) and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,255,255); aH.Outline=true; aH.Position=Vector2.new(aR,aS-16); aH.Visible=true
+        else
+            aH.Visible=false
+        end
+        aI.Text=N and string.format("%.0f studs",aO) or ""
+        aI.Position=Vector2.new(aR,aP.Y+20); aI.Visible=N
+    end)
+    L[aG]={conn=aM,drawings=aL}
 end
 
--- ==================== UI TABS ====================
+local function loadESP()
+    for aG,aH in pairs(a:GetPlayers()) do
+        if aH~=r and not L[aH] then createESP(aH) end
+    end
+end
+-- ==================== UI & TABS ====================
 local aN_tab=B:Tab({Title="การต่อสู้",Icon="crosshair"})
 aN_tab:Section({Title="GUN"})
 local aO=aN_tab:Toggle({Title="เล็งเงียบ",Default=false,Callback=function(aO) F=aO; I=nil end})
 D:Register("SilentAim",aO)
 local aP=aN_tab:Toggle({Title="ล็อคเส้นสีแดง",Default=false,Callback=function(aP) G=aP; I=nil end})
 D:Register("SilentAimAttach",aP)
-local aQ=aN_tab:Slider({Title="FOV",Step=1,Value={Min=20,Max=800,Default=H},Callback=function(aQ) H=tonumber(aQ) or 120 end})
-D:Register("FOVRadius",aQ)
-local aR=aN_tab:Input({Title="พันธมิตร",Desc="",Value="",InputIcon="shield-check",Type="Input",Placeholder="",Callback=function(aR)
+aN_tab:Slider({Title="FOV",Step=1,Value={Min=20,Max=800,Default=H},Callback=function(aQ) H=tonumber(aQ) or 120 end})
+aN_tab:Input({Title="พันธมิตร",Desc="",Value="",InputIcon="shield-check",Type="Input",Placeholder="",Callback=function(aR)
     P={}
     for aS in string.gmatch(aR,"%S+") do table.insert(P,aS) end
 end})
-D:Register("FriendsList",aR)
 
 local aS_tab=B:Tab({Title="แต่งปืน",Icon="layers"})
 aS_tab:Section({Title="แต่งปืน"})
+ai().FireRateValue=1000; ai().AccuracyValue=1; ai().RecoilValue=0; ai().Durability=999999999
+ai().Auto=true; ai().automatic=true; ai().AutoValue=true; ai().GunModsAutoApply=false
+
 aS_tab:Slider({Title="อัตราการยิง",Step=10,Value={Min=100,Max=10000,Default=1000},Callback=function(aU) ai().FireRateValue=aU end})
 aS_tab:Slider({Title="ความแม่นยำ",Step=0.01,Value={Min=0,Max=1,Default=1},Callback=function(aU) ai().AccuracyValue=aU end})
 aS_tab:Slider({Title="แรงดีด",Step=0.1,Value={Min=0,Max=10,Default=0},Callback=function(aU) ai().RecoilValue=aU end})
@@ -524,22 +493,17 @@ aS_tab:Toggle({Title="Automatic",Icon="check",Type="Checkbox",Value=false,Callba
 end})
 
 aS_tab:Section({Title="การตี"})
-D:Register("Fists Modifier",aS_tab:Toggle({Title="ตีระยะไกล",Desc="หมัดกว้าง",Default=false,Callback=function(aV) ay=aV end}))
-local aV_toggle=aS_tab:Toggle({Title="ตีออโต้",Default=false,Callback=function(aV) ab=aV end})
-D:Register("AutoAttack_Enabled",aV_toggle)
+aS_tab:Toggle({Title="ตีระยะไกล",Desc="หมัดกว้าง",Default=false,Callback=function(aV) ay=aV end})
+aS_tab:Toggle({Title="ตีออโต้",Default=false,Callback=function(aV) ab=aV end})
 
 local aW_tab=B:Tab({Title="ESP",Icon="eye"})
 aW_tab:Section({Title="ESP"})
-aW_tab:Toggle({Title="ระบบ esp ทั้งหมด",Default=false,Callback=function(v) M=v; O=v; N=v end})
-D:Register("AllESP", aW_tab)
+aW_tab:Toggle({Title="ระบบ esp ทั้งหมด",Default=false,Callback=function(v) M=v; O=v; N=v; highlightEnabled=v end})
 
 local a1_tab=B:Tab({Title="CHARACTER",Icon="user"})
 a1_tab:Section({Title="CHARACTER"})
-local a2=a1_tab:Toggle({Title="Walk Spssd",Default=false,Callback=function(a2) Q=a2 end})
-D:Register("วิ่งเร็ว",a2)
-local a3=a1_tab:Slider({Title="หลอดปรับความเร็ว",Step=0.5,Value={Min=1,Max=5,Default=2},Callback=function(a3) R=a3*0.05 end})
-D:Register("SpeedMultiplier",a3)
-
+a1_tab:Toggle({Title="Walk Spssd",Default=false,Callback=function(a2) Q=a2 end})
+a1_tab:Slider({Title="หลอดปรับความเร็ว",Step=0.5,Value={Min=1,Max=5,Default=2},Callback=function(a3) R=a3*0.05 end})
 a1_tab:Toggle({Title="lnfnite Stamina",Default=false,Callback=function(a6) as=a6 end})
 a1_tab:Toggle({Title="Anti Kill",Default=false,Callback=function(a8) enabled=a8 end})
 a1_tab:Toggle({Title="ดูดของ",Default=false,Callback=function(a9) ak=a9 end})
