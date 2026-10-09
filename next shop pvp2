@@ -1,587 +1,127 @@
-local WindUI = loadstring(game:HttpGet(
-    "https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"
-))()
+local players = game:GetService("Players")
+local runService = game:GetService("RunService")
+local replicatedStorage = game:GetService("ReplicatedStorage")
+local userInputService = game:GetService("UserInputService")
+local tweenService = game:GetService("TweenService")
+local debris = game:GetService("Debris")
+local workspace = game:GetService("Workspace")
+local contextActionService = game:GetService("ContextActionService")
+
+local localPlayer = players.LocalPlayer
+local camera = workspace.CurrentCamera
+
+local WindUI = loadstring(game:HttpGet("https://github.com/Footagesus/WindUI/releases/latest/download/main.lua"))()
 
 local Window = WindUI:CreateWindow({
-    Title = "nextshopPvP",
-    Icon = "crosshair",
-    Author = "BOON Hun & Refactored",
-    Folder = "BlockSpinHubMaster"
+    Title = "MaxGanHub | Block spin",
+    Icon = "rbxassetid://131572376338692",
+    Author = "Block Spin",
+    Folder = "Boss",
+    Size = UDim2.fromOffset(650, 400),
+    Theme = "Dark",
+    Transparent = true,
+    Resizable = true,
+    KeyCode = Enum.KeyCode.G
 })
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
-local Workspace = game:GetService("Workspace")
-local UIS = game:GetService("UserInputService")
+Window:EditOpenButton({
+    Title = "Salmon x Hub | Block spin",
+    Icon = "rbxassetid://110538801742199",
+    CornerRadius = UDim.new(0, 16),
+    StrokeThickness = 2,
+    Color = ColorSequence.new(
+        Color3.fromHex("FF0F7B"), 
+        Color3.fromHex("F89B29")
+    ),
+    OnlyMobile = false,
+    Enabled = true,
+    Draggable = true,
+})
 
-local LocalPlayer = Players.LocalPlayer
+-- สร้างแท็บทั้งหมดตามภาพเมนู
+local searchTab = Window:Tab({Title = "Search", Icon = "search"})
+local infoTab = Window:Tab({Title = "Info", Icon = "info"})
+local combatTab = Window:Tab({Title = "Combat", Icon = "crosshair"})
+local visualTab = Window:Tab({Title = "Visual", Icon = "eye"})
+local cosmeticsTab = Window:Tab({Title = "Cosmetics", Icon = "palette"})
+local shopTab = Window:Tab({Title = "Shop", Icon = "shopping-cart"})
+local gunTab = Window:Tab({Title = "Gun", Icon = "crosshair"})
+local vehicleTab = Window:Tab({Title = "Vehicle", Icon = "car"})
+local exploitTab = Window:Tab({Title = "Exploit", Icon = "star"})
+local miscTab = Window:Tab({Title = "Misc", Icon = "wrench"})
+local serverTab = Window:Tab({Title = "Server", Icon = "server"})
+local settingsTab = Window:Tab({Title = "ตั้งค่า", Icon = "settings"})
 
-local VehicleConfig = {
-    Flight = false,
-    Underground = false,
-    Speed = 90,
-    HoverHeight = 1,
-    Depth = 30,
-    UndergroundKey = Enum.KeyCode.U
-}
-
-local status = {}
-local isRunning = true
-local vehicleState = nil
-local capturingVehicleKey = false
-
-local function currentBody()
-    local char = LocalPlayer.Character
-    local hum = char and char:FindFirstChildOfClass("Humanoid")
-    local root = char and char:FindFirstChild("HumanoidRootPart")
-
-    if hum and root and hum.Health > 0 then
-        return char, hum, root
+-- ตัวอย่างฟังก์ชันใน Combat (Fov & Silent Aim)
+combatTab:Section({Title = "Fov"})
+local fovRadius = 120
+local fovVisible = false
+local silentAimEnabled = false
+local antiLockEnabled = false
+combatTab:Toggle({
+    Title = "เปิดวงล็อค Fov",
+    Default = false,
+    Callback = function(value)
+        fovVisible = value
     end
-end
+})
 
-local function downed(hum)
-    return hum:GetAttribute("HasBeenDowned") == true
-        or hum:GetAttribute("IsDead") == true
-end
-
-local function driverVehicle()
-    local char, hum = currentBody()
-    local seat = hum and hum.SeatPart
-
-    if not seat or not seat:IsA("VehicleSeat")
-        or seat.Occupant ~= hum or downed(hum) then
-        return
+combatTab:Slider({
+    Title = "ปรับขนาด Fov",
+    Step = 1,
+    Value = {Min = 20, Max = 800, Default = fovRadius},
+    Callback = function(value)
+        fovRadius = value
     end
+})
 
-    local vehicle = seat:FindFirstAncestorOfClass("Model")
-    local chassis
-
-    while vehicle and vehicle ~= Workspace do
-        if vehicle:IsA("Model") then
-            chassis = vehicle:FindFirstChild("Chassis")
-
-            if not chassis then
-                local body = vehicle:FindFirstChild("Body")
-                chassis = body and body:FindFirstChild("Base")
-            end
-
-            if chassis and chassis:IsA("BasePart") then
-                break
-            end
-        end
-
-        vehicle = vehicle.Parent
+combatTab:Section({Title = "Silent Aim"})
+combatTab:Toggle({
+    Title = "เปิดล็อคหัว",
+    Default = false,
+    Callback = function(value)
+        silentAimEnabled = value
     end
-
-    if not vehicle or not vehicle:IsA("Model")
-        or not chassis or not chassis:IsA("BasePart")
-        or chassis.Anchored then
-        return
+})
+combatTab:Toggle({
+    Title = "กันล็อค",
+    Default = false,
+    Callback = function(value)
+        antiLockEnabled = value
     end
+})
 
-    local assembly = chassis.AssemblyRootPart
-
-    if not assembly or not assembly:IsDescendantOf(vehicle)
-        or assembly.Anchored
-        or vehicle:GetAttribute("DisableControls") then
-        return
+-- ตัวอย่างแท็บ Misc (ระบบ Rejoin / Server Hop)
+miscTab:Section({Title = "Server Control"})
+miscTab:Button({
+    Title = "Server Rejoin",
+    Desc = "กลับเข้าเซิร์ฟเวอร์เดิม",
+    Callback = function()
+        game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, localPlayer)
     end
+})
 
-    return vehicle, chassis, seat, char
-end
-
-local function restoreVehicleCollision(state)
-    for part, value in pairs(state.collisions) do
-        if part.Parent then
-            pcall(function()
-                part.CanCollide = value
-            end)
-        end
-    end
-
-    table.clear(state.collisions)
-
-    if state.savedEvaluateStateMachine ~= nil then
-        local hum = state.char:FindFirstChildOfClass("Humanoid")
-
-        if hum and hum.Parent and hum.EvaluateStateMachine == false then
-            hum.EvaluateStateMachine = state.savedEvaluateStateMachine
-        end
-
-        state.savedEvaluateStateMachine = nil
-    end
-end
-
-local function stopVehicle()
-    local state = vehicleState
-    vehicleState = nil
-
-    VehicleConfig.Flight = false
-    VehicleConfig.Underground = false
-
-    if not state then
-        return
-    end
-
-    for _, connection in ipairs(state.connections) do
-        connection:Disconnect()
-    end
-
-    for _, object in ipairs(state.objects) do
-        object:Destroy()
-    end
-
-    restoreVehicleCollision(state)
-end
-
-local function setVehicleCollision(state, enabled)
-    if enabled then
-        restoreVehicleCollision(state)
-        return
-    end
-
-    local hum = state.char:FindFirstChildOfClass("Humanoid")
-
-    if hum and hum.SeatPart == state.seat then
-        if state.savedEvaluateStateMachine == nil then
-            state.savedEvaluateStateMachine = hum.EvaluateStateMachine
-        end
-
-        hum.EvaluateStateMachine = false
-    end
-
-    local function disable(part)
-        if part:IsA("BasePart") then
-            if state.collisions[part] == nil then
-                state.collisions[part] = part.CanCollide
-            end
-
-            part.CanCollide = false
-        end
-    end
-
-    for _, container in ipairs({state.vehicle, state.char}) do
-        for _, part in ipairs(container:GetDescendants()) do
-            disable(part)
-        end
-    end
-end
-
-local function createVehicleState(vehicle, chassis, seat, char)
-    local state = {
-        vehicle = vehicle,
-        chassis = chassis,
-        seat = seat,
-        char = char,
-        origin = chassis.CFrame,
-        collisions = {},
-        connections = {},
-        objects = {},
-        lastPosition = chassis.Position
-    }
-
-    vehicleState = state
-    status.VehicleMode = "Ready"
-
-    local function object(class, name)
-        local value = Instance.new(class)
-        value.Name = name
-        state.objects[#state.objects + 1] = value
-        return value
-    end
-
-    local attachment = object("Attachment", "MaxGanVehicleAttachment")
-    attachment.Parent = chassis
-
-    local velocity = object("LinearVelocity", "MaxGanVehicleVelocity")
-    velocity.Attachment0 = attachment
-    velocity.RelativeTo = Enum.ActuatorRelativeTo.World
-    velocity.VelocityConstraintMode = Enum.VelocityConstraintMode.Vector
-    velocity.ForceLimitsEnabled = true
-    velocity.ForceLimitMode = Enum.ForceLimitMode.PerAxis
-    velocity.Enabled = false
-    velocity.Parent = chassis
-
-    local orientation = object("AlignOrientation", "MaxGanVehicleOrientation")
-    orientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
-    orientation.Attachment0 = attachment
-    orientation.Responsiveness = 15
-    orientation.MaxAngularVelocity = 4
-    orientation.CFrame = chassis.CFrame.Rotation
-    orientation.Enabled = false
-    orientation.Parent = chassis
-
-    state.velocity = velocity
-    state.orientation = orientation
-
-    for _, container in ipairs({vehicle, char}) do
-        state.connections[#state.connections + 1] =
-            container.DescendantAdded:Connect(function(part)
-                if vehicleState == state
-                    and next(state.collisions) ~= nil
-                    and part:IsA("BasePart") then
-
-                    state.collisions[part] = part.CanCollide
-                    part.CanCollide = false
+-- ตัวอย่างแท็บ Vehicle
+vehicleTab:Section({Title = "Vehicle Controls"})
+vehicleTab:Button({
+    Title = "Pull Car Owner",
+    Desc = "ดึงรถของฉันมาหาตัว",
+    Callback = function()
+        local vehicles = workspace:WaitForChild("Vehicles", 2)
+        if vehicles then
+            for _, vehicle in pairs(vehicles:GetChildren()) do
+                if vehicle:IsA("Model") and vehicle:GetAttribute("OwnerUserId") == localPlayer.UserId then
+                    local rootPart = localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart")
+                    if rootPart and vehicle.PrimaryPart then
+                        vehicle:SetPrimaryPartCFrame(rootPart.CFrame * CFrame.new(0, 3, -5))
+                    end
                 end
-            end)
-    end
-
-    return state
-end
-
-local function ensureVehicleState()
-    local vehicle, chassis, seat, char = driverVehicle()
-
-    if not vehicle then
-        status.VehicleMode = "Sit in the driver seat"
-        return
-    end
-
-    if vehicleState and vehicleState.seat ~= seat then
-        stopVehicle()
-    end
-
-    if vehicleState then
-        return vehicleState
-    end
-
-    return createVehicleState(vehicle, chassis, seat, char)
-end
-
-local function returnVehicleUp()
-    local state = vehicleState or ensureVehicleState()
-    if not state then return end
-
-    local chassis = state.chassis
-    local position = chassis.Position
-    local box, size = state.vehicle:GetBoundingBox()
-    local bottomOffset = math.max(
-        position.Y - box.Position.Y + size.Y / 2,
-        size.Y / 2
-    )
-
-    local params = RaycastParams.new()
-    params.FilterType = Enum.RaycastFilterType.Exclude
-    params.RespectCanCollide = true
-
-    local excluded = {state.vehicle, state.char}
-    local vehicles = Workspace:FindFirstChild("Vehicles")
-
-    if vehicles then
-        excluded[#excluded + 1] = vehicles
-    end
-
-    for _, player in ipairs(Players:GetPlayers()) do
-        if player.Character then
-            excluded[#excluded + 1] = player.Character
-        end
-    end
-
-    params.FilterDescendantsInstances = excluded
-
-    local top = math.max(position.Y, 1000) + 512
-    local hit = Workspace:Raycast(
-        Vector3.new(position.X, top, position.Z),
-        Vector3.new(
-            0,
-            -(top - Workspace.FallenPartsDestroyHeight + 100),
-            0
-        ),
-        params
-    )
-
-    if not hit or hit.Normal.Y < 0.3 then
-        status.VehicleMode = "Surface not found"
-        return
-    end
-
-    local targetY = math.max(position.Y, hit.Position.Y + bottomOffset + 2)
-    local look = Vector3.new(
-        chassis.CFrame.LookVector.X,
-        0,
-        chassis.CFrame.LookVector.Z
-    )
-
-    if look.Magnitude < 0.01 then
-        look = Vector3.new(0, 0, -1)
-    end
-
-    state.returnTarget = Vector3.new(position.X, targetY, position.Z)
-    state.returnSurfaceY = hit.Position.Y
-    state.returnParts = {}
-
-    for _, part in ipairs(state.vehicle:GetDescendants()) do
-        if part:IsA("BasePart") then
-            state.returnParts[#state.returnParts + 1] = part
-        end
-    end
-
-    state.returnCollisionSince = nil
-    state.returnProgressY = position.Y
-    state.returnProgressAt = os.clock()
-    state.returnRotation = CFrame.lookAt(Vector3.zero, look).Rotation
-    state.returnDuration = math.max(
-        12,
-        (targetY - position.Y) / math.max(VehicleConfig.Speed, 10) * 2 + 5
-    )
-
-    VehicleConfig.Underground = false
-    VehicleConfig.Flight = false
-
-    state.returning = true
-    state.stableSince = nil
-    state.returnStarted = os.clock()
-
-    setVehicleCollision(state, false)
-    status.VehicleMode = "Returning vehicle"
-end
-
-local function setVehicleUnderground(value)
-    if not isRunning then return end
-
-    if not value then
-        if VehicleConfig.Underground then
-            returnVehicleUp()
-        end
-        return
-    end
-
-    local state = ensureVehicleState()
-    if not state then return end
-
-    local _, size = state.vehicle:GetBoundingBox()
-    state.height = size.Y
-
-    local origin = state.undergroundOrigin or state.chassis.CFrame
-
-    if origin.Position.Y - VehicleConfig.Depth - size.Y
-        < Workspace.FallenPartsDestroyHeight + 10 then
-        status.VehicleMode = "Depth below world limit"
-        return
-    end
-
-    state.undergroundOrigin = origin
-    state.returning = false
-    state.stableSince = nil
-
-    VehicleConfig.Underground = true
-    VehicleConfig.Flight = false
-
-    setVehicleCollision(state, false)
-end
-
-local function vehicleMoveInput()
-    if UIS:GetFocusedTextBox() or capturingVehicleKey then
-        return Vector3.zero
-    end
-
-    local cam = Workspace.CurrentCamera
-    if not cam then return Vector3.zero end
-
-    local look = Vector3.new(
-        cam.CFrame.LookVector.X,
-        0,
-        cam.CFrame.LookVector.Z
-    )
-
-    if look.Magnitude < 0.01 then
-        return Vector3.zero
-    end
-
-    look = look.Unit
-    local right = look:Cross(Vector3.yAxis)
-
-    local forward =
-        (UIS:IsKeyDown(Enum.KeyCode.W) and 1 or 0)
-        - (UIS:IsKeyDown(Enum.KeyCode.S) and 1 or 0)
-
-    local sideways =
-        (UIS:IsKeyDown(Enum.KeyCode.D) and 1 or 0)
-        - (UIS:IsKeyDown(Enum.KeyCode.A) and 1 or 0)
-
-    local direction = look * forward + right * sideways
-
-    if direction.Magnitude > 1 then
-        direction = direction.Unit
-    end
-
-    return direction
-end
-
-local function updateVehicleMovement(dt)
-    local state = vehicleState
-
-    if not isRunning or not state then return end
-
-    local vehicle, _, seat = driverVehicle()
-
-    if vehicle ~= state.vehicle or seat ~= state.seat
-        or LocalPlayer.Character ~= state.char then
-        stopVehicle()
-        return
-    end
-
-    if not state.velocity.Parent or not state.orientation.Parent then
-        stopVehicle()
-        return
-    end
-
-    local chassis = state.chassis
-    local position = chassis.Position
-    local direction = vehicleMoveInput()
-    local velocity = direction * VehicleConfig.Speed
-
-    local active = VehicleConfig.Underground or state.returning
-    local mass = chassis.AssemblyMass
-
-    if mass == math.huge or mass ~= mass then
-        stopVehicle()
-        return
-    end
-
-    local force = math.max(mass * math.max(Workspace.Gravity, 50) * 8, 1000)
-
-    state.velocity.MaxAxesForce = Vector3.new(force, active and force or 0, force)
-    state.orientation.MaxTorque = force * 15
-    state.orientation.Enabled = active
-
-    if direction.Magnitude > 0.05 then
-        state.orientation.CFrame = CFrame.lookAt(Vector3.zero, direction).Rotation
-    end
-
-    if state.returning then
-        local target = state.returnTarget
-
-        if not target then
-            status.VehicleMode = "Return target unavailable"
-            return
-        end
-
-        local delta = target - position
-        velocity = delta.Magnitude > 0.05
-            and delta.Unit * math.min(VehicleConfig.Speed, delta.Magnitude * 5)
-            or Vector3.zero
-
-        state.orientation.CFrame = state.returnRotation
-        status.VehicleMode = "Returning vehicle"
-
-        if delta.Magnitude < 1.5
-            and math.abs(chassis.AssemblyLinearVelocity.Y) < 5 then
-
-            state.stableSince = state.stableSince or os.clock()
-
-            if os.clock() - state.stableSince >= 1.5 then
-                restoreVehicleCollision(state)
-                stopVehicle()
-                status.VehicleMode = "Vehicle returned"
-                return
             end
-        else
-            state.stableSince = nil
         end
-
-    elseif VehicleConfig.Underground then
-        local targetY = state.undergroundOrigin.Position.Y - VehicleConfig.Depth
-
-        if targetY - state.height < Workspace.FallenPartsDestroyHeight + 10 then
-            returnVehicleUp()
-            return
-        end
-
-        velocity += Vector3.new(
-            0,
-            math.clamp((targetY - position.Y) * 6,
-                -VehicleConfig.Speed, VehicleConfig.Speed),
-            0
-        )
-
-        status.VehicleMode =
-            math.abs(targetY - position.Y) < 1.5
-            and "Underground"
-            or "Moving underground"
-    else
-        state.velocity.Enabled = false
-        status.VehicleMode = "Off"
-    end
-
-    state.velocity.VectorVelocity = velocity
-    state.velocity.Enabled = active
-end
-
-RunService.PreSimulation:Connect(function(dt)
-    local ok, err = pcall(updateVehicleMovement, dt)
-
-    if not ok then
-        stopVehicle()
-        status.VehicleError = tostring(err)
-    end
-end)
-
--- WindUI vehicle controls
-local VehicleTab = Window:Tab({
-    Title = "Vehicle",
-    Icon = "car"
-})
-
-VehicleTab:Toggle({
-    Title = "Vehicle Underground",
-    Value = false,
-    Callback = function(value)
-        setVehicleUnderground(value)
     end
 })
 
-VehicleTab:Button({
-    Title = "Vehicle Return UP",
-    Callback = function()
-        returnVehicleUp()
-    end
-})
-
-VehicleTab:Button({
-    Title = "Stop Vehicle Features",
-    Callback = function()
-        stopVehicle()
-        status.VehicleMode = "Off"
-    end
-})
-
-VehicleTab:Slider({
-    Title = "Move Speed",
-    Step = 5,
-    Value = {
-        Min = 5,
-        Max = 300,
-        Default = 90
-    },
-    Callback = function(value)
-        VehicleConfig.Speed = value
-    end
-})
-
-VehicleTab:Slider({
-    Title = "Vehicle Depth",
-    Step = 5,
-    Value = {
-        Min = 5,
-        Max = 100,
-        Default = 30
-    },
-    Callback = function(value)
-        VehicleConfig.Depth = value
-    end
-})
-
-VehicleTab:Slider({
-    Title = "Surface Height",
-    Step = 0.5,
-    Value = {
-        Min = 0.5,
-        Max = 5,
-        Default = 1
-    },
-    Callback = function(value)
-        VehicleConfig.HoverHeight = value
-    end
+WindUI:Notify({
+    Title = "Salmon x Hub",
+    Content = "โหลดเมนูทั้งหมดสำเร็จแล้ว!",
+    Duration = 3
 })
