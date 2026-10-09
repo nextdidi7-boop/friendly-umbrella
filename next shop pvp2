@@ -23,6 +23,7 @@ local Window = WindUI:CreateWindow({
     Resizable = true,
     KeyCode = Enum.KeyCode.G
 })
+
 Window:EditOpenButton({
     Title = "Salmon x Hub | Block spin",
     Icon = "rbxassetid://110538801742199",
@@ -37,7 +38,7 @@ Window:EditOpenButton({
     Draggable = true,
 })
 
--- สร้างแท็บทั้งหมดตามภาพเมนู
+-- เธชเธฃเนเธฒเธเนเธ—เนเธเธ—เธฑเนเธเธซเธกเธ”เธ•เธฒเธกเธ เธฒเธเน€เธกเธเธน
 local searchTab = Window:Tab({Title = "Search", Icon = "search"})
 local infoTab = Window:Tab({Title = "Info", Icon = "info"})
 local combatTab = Window:Tab({Title = "Combat", Icon = "crosshair"})
@@ -49,16 +50,17 @@ local vehicleTab = Window:Tab({Title = "Vehicle", Icon = "car"})
 local exploitTab = Window:Tab({Title = "Exploit", Icon = "star"})
 local miscTab = Window:Tab({Title = "Misc", Icon = "wrench"})
 local serverTab = Window:Tab({Title = "Server", Icon = "server"})
-local settingsTab = Window:Tab({Title = "ตั้งค่า", Icon = "settings"})
+local settingsTab = Window:Tab({Title = "เธ•เธฑเนเธเธเนเธฒ", Icon = "settings"})
 
--- ตัวอย่างฟังก์ชันใน Combat (Fov & Silent Aim)
+-- เธ•เธฑเธงเธญเธขเนเธฒเธเธเธฑเธเธเนเธเธฑเธเนเธ Combat (Fov & Silent Aim)
 combatTab:Section({Title = "Fov"})
 local fovRadius = 120
 local fovVisible = false
 local silentAimEnabled = false
 local antiLockEnabled = false
+
 combatTab:Toggle({
-    Title = "เปิดวงล็อค Fov",
+    Title = "เน€เธเธดเธ”เธงเธเธฅเนเธญเธ Fov",
     Default = false,
     Callback = function(value)
         fovVisible = value
@@ -66,7 +68,7 @@ combatTab:Toggle({
 })
 
 combatTab:Slider({
-    Title = "ปรับขนาด Fov",
+    Title = "เธเธฃเธฑเธเธเธเธฒเธ” Fov",
     Step = 1,
     Value = {Min = 20, Max = 800, Default = fovRadius},
     Callback = function(value)
@@ -76,35 +78,36 @@ combatTab:Slider({
 
 combatTab:Section({Title = "Silent Aim"})
 combatTab:Toggle({
-    Title = "เปิดล็อคหัว",
+    Title = "เน€เธเธดเธ”เธฅเนเธญเธเธซเธฑเธง",
     Default = false,
     Callback = function(value)
         silentAimEnabled = value
     end
 })
+
 combatTab:Toggle({
-    Title = "กันล็อค",
+    Title = "เธเธฑเธเธฅเนเธญเธ",
     Default = false,
     Callback = function(value)
         antiLockEnabled = value
     end
 })
 
--- ตัวอย่างแท็บ Misc (ระบบ Rejoin / Server Hop)
+-- เธ•เธฑเธงเธญเธขเนเธฒเธเนเธ—เนเธ Misc (เธฃเธฐเธเธ Rejoin / Server Hop)
 miscTab:Section({Title = "Server Control"})
 miscTab:Button({
     Title = "Server Rejoin",
-    Desc = "กลับเข้าเซิร์ฟเวอร์เดิม",
+    Desc = "เธเธฅเธฑเธเน€เธเนเธฒเน€เธเธดเธฃเนเธเน€เธงเธญเธฃเนเน€เธ”เธดเธก",
     Callback = function()
         game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, game.JobId, localPlayer)
     end
 })
 
--- ตัวอย่างแท็บ Vehicle
+-- เธ•เธฑเธงเธญเธขเนเธฒเธเนเธ—เนเธ Vehicle
 vehicleTab:Section({Title = "Vehicle Controls"})
 vehicleTab:Button({
     Title = "Pull Car Owner",
-    Desc = "ดึงรถของฉันมาหาตัว",
+    Desc = "เธ”เธถเธเธฃเธ–เธเธญเธเธเธฑเธเธกเธฒเธซเธฒเธ•เธฑเธง",
     Callback = function()
         local vehicles = workspace:WaitForChild("Vehicles", 2)
         if vehicles then
@@ -122,6 +125,6 @@ vehicleTab:Button({
 
 WindUI:Notify({
     Title = "Salmon x Hub",
-    Content = "โหลดเมนูทั้งหมดสำเร็จแล้ว!",
+    Content = "เนเธซเธฅเธ”เน€เธกเธเธนเธ—เธฑเนเธเธซเธกเธ”เธชเธณเน€เธฃเนเธเนเธฅเนเธง!",
     Duration = 3
 })
