@@ -1,5 +1,5 @@
 --========================================================
--- [PART 1/4] UI LOADER & GLOBAL CONFIGURATION
+-- [PART 1/5] UI LOADER, GLOBAL CONFIGURATION & CORE ENGINE
 --========================================================
 
 local WindUI
@@ -17,10 +17,33 @@ local UserInputService = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
 local TeleportService = game:GetService("TeleportService")
 local HttpService = game:GetService("HttpService")
-local CoreGui = game:GetService("CoreGui")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TweenService = game:GetService("TweenService")
+local Debris = game:GetService("Debris")
 
 local Camera = Workspace.CurrentCamera
 local LocalPlayer = Players.LocalPlayer
+local r = LocalPlayer
+local s = r.Character or r.CharacterAdded:Wait()
+local t = s:WaitForChild("Humanoid")
+local u = s:WaitForChild("HumanoidRootPart")
+local y = Camera
+local f = Debris
+local g = Workspace
+local e = TweenService
+local b = RunService
+
+local E
+pcall(function() E = ReplicatedStorage:WaitForChild("Remotes", 5):WaitForChild("Send", 5) end)
+
+local aC
+pcall(function()
+    for aD, aE in ipairs(getgc(true)) do
+        if typeof(aE) == "table" and rawget(aE, "event") and rawget(aE, "func") then aC = aE break end
+    end
+end)
+
+local ai = getgenv or function() return _G end
 
 -- ค่าเริ่มต้นระบบ (Default Settings)
 _G.Settings = {
@@ -32,20 +55,9 @@ _G.Settings = {
     FOVSize = 100,
     RainbowFOV = false,
     TeamCheck = false,
-    SafezoneCheck = true,
     MaxDistance = 600,
 
     AutoShootOnTarget = false,
-    ItemAuraEnabled = false,
-    
-    FriendlyEnabled = false, -- เปิด/ปิด ระบบพันธมิตร
-    FriendlyNameInput = "",   -- ชื่อผู้เล่นที่เพิ่มเป็นพันธมิตร
-
-    AntiAFKEnabled = false,
-    ZoomEnabled = false,
-    AntiFallEnabled = false,
-    AntiTeleportEnabled = false,
-    FPSCounterEnabled = false,
 
     WalkSpeedEnabled = false,
     WalkSpeedVal = 16,
@@ -56,11 +68,14 @@ _G.Settings = {
     HealthESP = false,
     ToolESP = false,
     HighlightESP = false,
-    RainbowESP = false
-}
+    RainbowESP = false,
 
--- ตารางเก็บรายชื่อพันธมิตร
-_G.FriendlyPlayers = _G.FriendlyPlayers or {}
+    RedTracerEnabled = false,
+    SilentAimEnabled = false,
+    CustomWalkSpeed = false,
+    SpeedMultiplier = 2,
+    InfStamina = false
+}
 
 _G.BoobSettings = {
     Enabled = false,
@@ -69,15 +84,20 @@ _G.BoobSettings = {
     Size = 1.0
 }
 
--- ระบบ Save / Load Config
+local F = false
+local G = false
+local I = nil
+local Q = false
+local R = 0.1
+local as = false
+
 local ConfigFileName = "nextshopPvP_Config.json"
 
 local function SaveConfig()
     pcall(function()
         local dataToSave = {
             Settings = _G.Settings,
-            BoobSettings = _G.BoobSettings,
-            FriendlyPlayers = _G.FriendlyPlayers
+            BoobSettings = _G.BoobSettings
         }
         writefile(ConfigFileName, HttpService:JSONEncode(dataToSave))
     end)
@@ -99,9 +119,6 @@ local function LoadConfig()
                     _G.BoobSettings[k] = v
                 end
             end
-            if decoded.FriendlyPlayers then
-                _G.FriendlyPlayers = decoded.FriendlyPlayers
-            end
         end
     end)
 end
@@ -116,7 +133,7 @@ local FOVGui = Instance.new("ScreenGui")
 FOVGui.Name = "HUB_FOV_GUI"
 FOVGui.ResetOnSpawn = false
 FOVGui.IgnoreGuiInset = true
-pcall(function() FOVGui.Parent = CoreGui end)
+pcall(function() FOVGui.Parent = game:GetService("CoreGui") end)
 if not FOVGui.Parent then FOVGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
 local FOVCircle = Instance.new("Frame", FOVGui)
@@ -132,57 +149,223 @@ local FOVStroke = Instance.new("UIStroke", FOVCircle)
 FOVStroke.Thickness = 2
 FOVStroke.Color = Color3.fromRGB(255, 255, 255)
 
--- สร้าง GUI สำหรับ FPS สีรุ้ง (ลากได้)
-local FPSGui = Instance.new("ScreenGui")
-FPSGui.Name = "HUB_FPS_GUI"
-FPSGui.ResetOnSpawn = false
-FPSGui.IgnoreGuiInset = true
-pcall(function() FPSGui.Parent = CoreGui end)
-if not FPSGui.Parent then FPSGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
-
-local FPSLabel = Instance.new("TextLabel", FPSGui)
-FPSLabel.Name = "FPSLabel"
-FPSLabel.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-FPSLabel.BackgroundTransparency = 0.5
-FPSLabel.Position = UDim2.new(0, 10, 0, 10)
-FPSLabel.Size = UDim2.fromOffset(110, 30)
-FPSLabel.Font = Enum.Font.GothamBold
-FPSLabel.Text = "FPS: 60"
-FPSLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-FPSLabel.TextSize = 14
-FPSLabel.Visible = false
-Instance.new("UICorner", FPSLabel).CornerRadius = UDim.new(0, 6)
-
--- ระบบลาก FPS Label
-local dragging, dragInput, dragStart, startPos
-FPSLabel.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-        dragging = true
-        dragStart = input.Position
-        startPos = FPSLabel.Position
-        input.Changed:Connect(function()
-            if input.UserInputState == Enum.UserInputState.End then
-                dragging = false
-            end
-        end)
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-        local delta = input.Position - dragStart
-        FPSLabel.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-    end
-end)
-
 _G.WindUIInstance = WindUI
 _G.PlayerESPFolder = PlayerESPFolder
 _G.FOVStroke = FOVStroke
 _G.FOVCircle = FOVCircle
-_G.FPSLabel = FPSLabel
-_G.FPSGui = FPSGui
 --========================================================
--- [PART 2/4] COMBAT, AIMBOT & PHYSICS LOGIC
+-- [PART 2/5] GUN SYSTEM (RED LINE TRACER), STAMINA & SPEED LOGIC
+--========================================================
+
+local function getPing()
+    local aD = r:FindFirstChild("PlayerGui")
+    if not aD then return 0.2 end
+    local aE = aD:FindFirstChild("NetworkStats")
+    if not aE then return 0.2 end
+    local aF = aE:FindFirstChild("PingLabel")
+    if not aF then return 0.2 end
+    local aG = aF.Text
+    if typeof(aG) ~= "string" then return 0.2 end
+    local aH = tonumber(aG:match("%d+"))
+    if not aH then return 0.2 end
+    local aI = aH / 1000
+    if aI < 0 or aI > 2 then aI = 0.2 end
+    return aI
+end
+
+local aG = 6; local aH = 1.2; local aI = 150; local aK = {}
+b.Heartbeat:Connect(function()
+    for aM, aN in ipairs(Players:GetPlayers()) do
+        if aN ~= r and aN.Character then
+            local aO = aN.Character; local aP = aO:FindFirstChild("HumanoidRootPart"); local aQ = aO:FindFirstChild("Humanoid")
+            if aP and aQ and aQ.Health > 0 then
+                aK[aN] = aK[aN] or {}
+                table.insert(aK[aN], {time = os.clock(), pos = aP.Position})
+                if #aK[aN] > aG then table.remove(aK[aN], 1) end
+            else aK[aN] = nil end
+        end
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(aM) aK[aM] = nil end)
+
+local function calculateVelocity(aM)
+    local aN = aK[aM]
+    if not aN or #aN < 2 then return Vector3.new() end
+    local aO = Vector3.new(); local aP = 0
+    for aQ = 2, #aN do
+        local aR = aN[aQ].time - aN[aQ-1].time
+        if aR > 0 then aO = aO + (aN[aQ].pos - aN[aQ-1].pos) / aR; aP = aP + 1 end
+    end
+    if aP == 0 then return Vector3.new() end
+    local aQ = aO / aP
+    if aQ.Y > aI then return Vector3.new(aQ.X * 1.15, math.clamp(aQ.Y * 0.85, 0, 400), aQ.Z * 1.15) end
+    return aQ
+end
+
+local function predictPosition2(aM, aN)
+    if not aM then return Vector3.zero end
+    local aO = aM.Parent; local aP = aO and Players:GetPlayerFromCharacter(aO)
+    if not aP then return aM.Position end
+    local aQ = calculateVelocity(aP) or Vector3.zero
+    local aR = (getPing and getPing()) or 0.1
+    if aR < 0 then aR = 0.1 end
+    return aM.Position + (aQ * aR * aH)
+end
+
+local function isShotgun()
+    if not s then return false end
+    for aM, aN in ipairs(s:GetChildren()) do
+        if aN:IsA("Tool") then
+            local aO = aN:GetAttribute("AmmoType")
+            if aO == "shotgun" or aO == "shootgun" then return true end
+        end
+    end
+    return false
+end
+
+local function isBehindWall(aD, aE)
+    if not aD or not aE then return false end
+    local aF = aE - aD
+    if aF.Magnitude < 1 then return false end
+    local aG = {}
+    local aH = r.Character
+    if aH then table.insert(aG, aH) end
+    local aI = I and I.Character
+    if aI then table.insert(aG, aI) end
+    local aJ = workspace:Raycast(aD, aF, RaycastParams.new())
+    if not aJ then return false end
+    local aK = aJ.Instance
+    return aK and not table.find(aG, aK.Parent)
+end
+
+-- HOOK FIRESERVER LOGIC (ระบบยิงปืนเส้นสีแดง)
+local aM
+if E and E.FireServer then
+    local aN = pcall(function()
+        aM = hookfunction(E.FireServer, function(aN, ...)
+            if aN ~= E then return aM(aN, ...) end
+            local aO = {...}
+            if (_G.Settings.RedTracerEnabled or F) and aO[2] == "shoot_gun" and I then
+                local aP = I.Character and I.Character:FindFirstChild("Head")
+                local aQ = I.Character and I.Character:FindFirstChild("HumanoidRootPart")
+                local aR = I.Character and I.Character:FindFirstChild("Humanoid")
+                if aP and aQ and aR then
+                    local aS = predictPosition2(aP, aQ)
+                    local aT = r.Character and r.Character:FindFirstChild("Head")
+                    local aU = aT and aT.Position or nil
+                    if isShotgun() then
+                        aO[4] = CFrame.new(aU, aS)
+                        local aV = {}
+                        for aW = 1, 6 do
+                            local aX = Vector3.new(math.random(-2,2)*0.03, math.random(-2,2)*0.03, math.random(-2,2)*0.03)
+                            table.insert(aV, {[1] = {Instance = aP, Normal = Vector3.new(0,1,0), Position = aS + aX}})
+                        end
+                        aO[5] = aV
+                    else
+                        local aV = isBehindWall(aU, aS)
+                        if aV then aO[4] = CFrame.new(math.huge, math.huge, math.huge) else aO[4] = CFrame.new(aU, aS) end
+                        aO[5] = {[1] = {[1] = {Instance = aP, Normal = Vector3.new(0,1,0), Position = aS}}}
+                    end
+                    local aV, aW = pcall(function()
+                        local aV = Instance.new("Part")
+                        aV.Anchored = true; aV.CanCollide = false
+                        aV.Size = Vector3.new(0.08, 0.08, (aS - r.Character.Head.Position).Magnitude)
+                        aV.CFrame = CFrame.new(r.Character.Head.Position, aS) * CFrame.new(0, 0, -aV.Size.Z/2)
+                        aV.Material = Enum.Material.Neon; aV.Transparency = 0.35; aV.Color = Color3.fromRGB(255, 0, 0)
+                        aV.Parent = workspace; f:AddItem(aV, 4)
+                        return aV
+                    end)
+                    if aR then
+                        local aX = aR.Health
+                        spawn(function()
+                            wait(0.1)
+                            if aR and aR.Health < aX then
+                                if aV and aW then aW.Color = Color3.fromRGB(0, 255, 0) end
+                                for aY, aZ in ipairs(I.Character:GetDescendants()) do
+                                    if aZ:IsA("BasePart") then
+                                        local a_ = Instance.new("Part")
+                                        a_.Size = aZ.Size + Vector3.new(0.05, 0.05, 0.05); a_.CFrame = aZ.CFrame
+                                        a_.Anchored = true; a_.CanCollide = false; a_.Material = Enum.Material.Neon
+                                        a_.Color = Color3.fromRGB(255, 0, 0); a_.Transparency = 0.5; a_.Parent = g
+                                        local a0 = TweenInfo.new(1.5, Enum.EasingStyle.Linear)
+                                        e:Create(a_, a0, {Transparency = 1}):Play(); f:AddItem(a_, 2)
+                                    end
+                                end
+                                if aP then
+                                    local aY = Instance.new("Part")
+                                    aY.Size = Vector3.new(0.2, 0.2, 0.2); aY.Shape = Enum.PartType.Ball
+                                    aY.Material = Enum.Material.Neon; aY.Color = Color3.fromRGB(255, 0, 0)
+                                    aY.CFrame = CFrame.new(aP.Position); aY.Anchored = false; aY.CanCollide = false; aY.Parent = g
+                                    local aZ = Instance.new("BodyVelocity")
+                                    aZ.Velocity = Vector3.new(math.random(-5, 5), math.random(5, 10), math.random(-5, 5))
+                                    aZ.P = 5000; aZ.MaxForce = Vector3.new(4000, 4000, 4000); aZ.Parent = aY; f:AddItem(aY, 1)
+                                end
+                            else
+                                if aV and aW then aW.Color = Color3.fromRGB(255, 0, 0) end
+                            end
+                        end)
+                    end
+                end
+            end
+            return aM(aN, unpack(aO))
+        end)
+    end)
+end
+
+-- WALK SPEED LOGIC
+local _
+local function setupCharacter(aD)
+    s = aD; t = aD:WaitForChild("Humanoid"); u = aD:WaitForChild("HumanoidRootPart")
+    if _ then pcall(function() _:Disconnect() end) end
+    _ = b.RenderStepped:Connect(function()
+        if (_G.Settings.CustomWalkSpeed or Q) and t and u then
+            if t.MoveDirection.Magnitude > 0 then u.CFrame = u.CFrame + (t.MoveDirection.Unit * (_G.Settings.SpeedMultiplier * 0.05)) end
+        end
+    end)
+end
+r.CharacterAdded:Connect(setupCharacter)
+if r.Character then setupCharacter(r.Character) end
+
+-- STAMINA LOGIC
+local a5 = {}
+function a5.send(...)
+    local a6 = {...}; aC.event = aC.event + 1
+    pcall(function() ReplicatedStorage:WaitForChild("Remotes").Send:FireServer(aC.event, unpack(a6)) end)
+end
+
+local function ToggleInfiniteStamina(state)
+    as = state
+    _G.Settings.InfStamina = state
+    if as then
+        local a7, a8 = pcall(function() return require(ReplicatedStorage.Modules.Game.Sprint) end)
+        if a7 and a8 then
+            local a9 = a8.consume_stamina; local ba = getupvalue(a9, 2).sprint_bar
+            if ba then
+                local bb = ba.update
+                ba.update = function(...) return bb(function() return 1 end) end
+                ai().OriginalSprintUpdate = bb
+                ai().AutoSprintLoop = task.spawn(function()
+                    while as do
+                        pcall(function() a5.send("set_sprinting_1", true); task.wait(0.5); a5.send("set_sprinting_1", false) end)
+                        task.wait(0.1)
+                    end
+                    pcall(function() a5.send("set_sprinting_1", false) end)
+                end)
+            else as = false end
+        else as = false end
+    else
+        if ai().AutoSprintLoop then task.cancel(ai().AutoSprintLoop); ai().AutoSprintLoop = nil end
+        pcall(function() a5.send("set_sprinting_1", false) end)
+        local a7, a8 = pcall(function() return require(ReplicatedStorage.Modules.Game.Sprint) end)
+        if a7 and a8 then
+            local a9 = a8.consume_stamina; local ba = getupvalue(a9, 2).sprint_bar
+            if ba and ai().OriginalSprintUpdate then ba.update = ai().OriginalSprintUpdate; ai().OriginalSprintUpdate = nil end
+        end
+    end
+end
+--========================================================
+-- [PART 3/5] COMBAT, AIMBOT & PHYSICS LOGIC
 --========================================================
 
 local CreatedBoobParts = {}
@@ -206,32 +389,6 @@ local function isTeammate(p)
     return p.Team == LocalPlayer.Team
 end
 
--- เช็คระบบพันธมิตร (เปิดใช้งาน + มีรายชื่อ)
-local function isFriendly(p)
-    if not _G.Settings.FriendlyEnabled then return false end
-    if _G.FriendlyPlayers[p.Name] or _G.FriendlyPlayers[tostring(p.UserId)] then
-        return true
-    end
-    return false
-end
-
--- เช็ค Safezone
-local function isInSafezone(char)
-    if not char then return false end
-    if char:GetAttribute("Safezone") or char:GetAttribute("InSafezone") then
-        return true
-    end
-    local root = char:FindFirstChild("HumanoidRootPart")
-    if root then
-        for _, part in ipairs(Workspace:GetPartsInPart(root)) do
-            if part.Name:lower():find("safe") or part.Parent.Name:lower():find("safe") then
-                return true
-            end
-        end
-    end
-    return false
-end
-
 local function getEquippedTool()
     return LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Tool")
 end
@@ -253,18 +410,16 @@ local function GetClosestTarget()
 
     for _, p in ipairs(Players:GetPlayers()) do
         if p ~= LocalPlayer and p.Character and isAlive(p.Character) and not isTeammate(p) then
-            if not isFriendly(p) and not (_G.Settings.SafezoneCheck and isInSafezone(p.Character)) then
-                local part = p.Character:FindFirstChild(_G.Settings.AimPart) or p.Character:FindFirstChild("Head")
-                local hrp = p.Character:FindFirstChild("HumanoidRootPart")
-                if part and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= _G.Settings.MaxDistance then
-                    if isVisible(part, p.Character) then
-                        local s, on = Camera:WorldToViewportPoint(part.Position)
-                        if on then
-                            local d = (Vector2.new(s.X, s.Y) - center).Magnitude
-                            if d < closest then
-                                closest = d
-                                target = part
-                            end
+            local part = p.Character:FindFirstChild(_G.Settings.AimPart) or p.Character:FindFirstChild("Head")
+            local hrp = p.Character:FindFirstChild("HumanoidRootPart")
+            if part and hrp and (Camera.CFrame.Position - hrp.Position).Magnitude <= _G.Settings.MaxDistance then
+                if isVisible(part, p.Character) then
+                    local s, on = Camera:WorldToViewportPoint(part.Position)
+                    if on then
+                        local d = (Vector2.new(s.X, s.Y) - center).Magnitude
+                        if d < closest then
+                            closest = d
+                            target = part
                         end
                     end
                 end
@@ -273,77 +428,6 @@ local function GetClosestTarget()
     end
     return target
 end
-
--- ระบบดูดของ (Item Aura) แก้ไขให้ดูดของที่ดรอปบนพื้นได้ชัวร์ขึ้น
-RunService.Heartbeat:Connect(function()
-    if _G.Settings.ItemAuraEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        local hrp = LocalPlayer.Character.HumanoidRootPart
-        pcall(function()
-            for _, obj in ipairs(Workspace:GetDescendants()) do
-                if obj:IsA("BasePart") and (obj.Name == "Handle" or obj.Parent:IsA("Tool") or obj.Name:lower():find("item") or obj.Name:lower():find("drop")) then
-                    if (obj.Position - hrp.Position).Magnitude <= 35 then
-                        firetouchinterest(hrp, obj, 0)
-                        firetouchinterest(hrp, obj, 1)
-                    end
-                end
-            end
-        end)
-    end
-end)
-
--- 1. ระบบกัน AFK
-LocalPlayer.Idled:Connect(function()
-    if _G.Settings.AntiAFKEnabled then
-        local vu = game:GetService("VirtualUser")
-        vu:Button2Down(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
-        task.wait(1)
-        vu:Button2Up(Vector2.new(0,0), Workspace.CurrentCamera.CFrame)
-    end
-end)
-
--- 2. ขยายระยะซูมกล้อง
-RunService.RenderStepped:Connect(function()
-    _G.FPSLabel.Visible = _G.Settings.FPSCounterEnabled
-    if _G.Settings.FPSCounterEnabled then
-        _G.FPSLabel.Text = "FPS: " .. math.floor(1 / RunService.RenderStepped:Wait())
-        _G.FPSLabel.TextColor3 = GetRainbow(1)
-    end
-
-    if _G.Settings.ZoomEnabled then
-        LocalPlayer.CameraMaxZoomDistance = 999999
-    else
-        LocalPlayer.CameraMaxZoomDistance = 400
-    end
-end)
-
--- 3. ระบบกันล้ม (ไม่ให้ลุกอัตโนมัติ / ล็อคสถานะ)
-LocalPlayer.CharacterAdded:Connect(function(char)
-    local hum = char:WaitForChild("Humanoid", 5)
-    if hum then
-        hum.StateChanged:Connect(function(_, newSte)
-            if _G.Settings.AntiFallEnabled then
-                if newSte == Enum.HumanoidStateType.FallingDown or newSte == Enum.HumanoidStateType.Ragdoll then
-                    hum:ChangeState(Enum.HumanoidStateType.GettingUp)
-                end
-            end
-        end)
-    end
-end)
-
--- 4. ระบบกันถูกวาป
-local lastPos = nil
-RunService.Heartbeat:Connect(function()
-    if _G.Settings.AntiTeleportEnabled and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        local hrp = LocalPlayer.Character.HumanoidRootPart
-        if lastPos and (hrp.Position - lastPos).Magnitude > 150 then
-            hrp.CFrame = CFrame.new(lastPos)
-        else
-            lastPos = hrp.Position
-        end
-    else
-        lastPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character.HumanoidRootPart.Position or nil
-    end
-end)
 
 _G.DestroyBoobs = function()
     for _, v in ipairs(CreatedBoobParts) do
@@ -400,11 +484,10 @@ end
 _G.GetRainbow = GetRainbow
 _G.isAlive = isAlive
 _G.isTeammate = isTeammate
-_G.isFriendly = isFriendly
 _G.getEquippedTool = getEquippedTool
 _G.GetClosestTarget = GetClosestTarget
 --========================================================
--- [PART 3/4] ESP SYSTEM & UPDATER LOOPS
+-- [PART 4/5] ESP SYSTEM & UPDATER LOOPS
 --========================================================
 
 local PlayerESPFolder = _G.PlayerESPFolder
@@ -412,70 +495,6 @@ local FOVStroke = _G.FOVStroke
 local FOVCircle = _G.FOVCircle
 
 local HIGHLIGHT_CACHE = {}
-
--- สีระดับความแรร์ 5 ระดับ
-local RARITY_COLORS = {
-    [1] = Color3.fromRGB(180, 180, 180),
-    [2] = Color3.fromRGB(0, 170, 255),
-    [3] = Color3.fromRGB(170, 0, 255),
-    [4] = Color3.fromRGB(255, 200, 0),
-    [5] = Color3.fromRGB(255, 30, 30),
-    
-    ["Common"]    = Color3.fromRGB(180, 180, 180),
-    ["Uncommon"]  = Color3.fromRGB(180, 180, 180),
-    ["Rare"]      = Color3.fromRGB(0, 170, 255),
-    ["Epic"]      = Color3.fromRGB(170, 0, 255),
-    ["Legendary"] = Color3.fromRGB(255, 200, 0),
-    ["Mythic"]    = Color3.fromRGB(255, 30, 30),
-    
-    ["Default"]   = Color3.fromRGB(255, 255, 255)
-}
-
-local function GetItemName(tool)
-    if not tool then return "Unknown" end
-    local nameAttr = tool:GetAttribute("ItemName") or tool:GetAttribute("DisplayName") or tool:GetAttribute("Name")
-    if nameAttr and tostring(nameAttr) ~= "" and tostring(nameAttr) ~= tostring(tool.Name) then 
-        return tostring(nameAttr) 
-    end
-    
-    local nameObj = tool:FindFirstChild("ItemName") or tool:FindFirstChild("DisplayName") or tool:FindFirstChild("Title")
-    if nameObj and nameObj:IsA("ValueBase") and tostring(nameObj.Value) ~= "" then
-        return tostring(nameObj.Value)
-    end
-    
-    if tonumber(tool.Name) then
-        for _, child in ipairs(tool:GetChildren()) do
-            if child:IsA("StringValue") and child.Name ~= "Rarity" and child.Name ~= "Tier" then
-                return child.Value
-            end
-        end
-    end
-    
-    return tool.Name
-end
-
-local function GetItemColor(tool)
-    if not tool then return RARITY_COLORS["Default"] end
-    local rarityVal = tool:GetAttribute("Rarity") or tool:GetAttribute("Tier") or tool:GetAttribute("RarityLevel")
-    if not rarityVal then
-        local child = tool:FindFirstChild("Rarity") or tool:FindFirstChild("Tier") or tool:FindFirstChild("RarityLevel")
-        if child and child:IsA("ValueBase") then
-            rarityVal = child.Value
-        end
-    end
-    
-    if rarityVal then
-        local numRarity = tonumber(rarityVal)
-        if numRarity and RARITY_COLORS[numRarity] then
-            return RARITY_COLORS[numRarity]
-        end
-        if RARITY_COLORS[tostring(rarityVal)] then
-            return RARITY_COLORS[tostring(rarityVal)]
-        end
-    end
-    
-    return RARITY_COLORS["Default"]
-end
 
 local function RemovePlayerESP(Player)
     local Folder = PlayerESPFolder:FindFirstChild(tostring(Player.UserId))
@@ -490,9 +509,9 @@ local function CreatePlayerESP(Player)
     if Player == LocalPlayer then return end
     local Character = Player.Character
     if not Character or not isAlive(Character) then return end
-    local RootPart = Character:FindFirstChild("HumanoidRootPart") or Character:FindFirstChild("Torso")
+    local Head = Character:FindFirstChild("Head")
     local Humanoid = Character:FindFirstChildOfClass("Humanoid")
-    if not RootPart or not Humanoid then return end
+    if not Head or not Humanoid then return end
 
     RemovePlayerESP(Player)
 
@@ -515,10 +534,10 @@ local function CreatePlayerESP(Player)
     if _G.Settings.NameESP or _G.Settings.HealthESP or _G.Settings.ToolESP then
         local Billboard = Instance.new("BillboardGui", Folder)
         Billboard.Name = "PlayerInfo"
-        Billboard.Adornee = RootPart
+        Billboard.Adornee = Head
         Billboard.AlwaysOnTop = true
-        Billboard.Size = UDim2.fromOffset(220, 160)
-        Billboard.StudsOffset = Vector3.new(0, 0.5, 0)
+        Billboard.Size = UDim2.fromOffset(220, 90)
+        Billboard.StudsOffset = Vector3.new(0, 3, 0)
 
         local Container = Instance.new("Frame", Billboard)
         Container.BackgroundTransparency = 1
@@ -526,117 +545,66 @@ local function CreatePlayerESP(Player)
 
         local Layout = Instance.new("UIListLayout", Container)
         Layout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-        Layout.VerticalAlignment = Enum.VerticalAlignment.Top
-        Layout.Padding = UDim.new(0, 1)
+        Layout.VerticalAlignment = Enum.VerticalAlignment.Center
+        Layout.Padding = UDim.new(0, 2)
 
         if _G.Settings.NameESP then
             local NameLabel = Instance.new("TextLabel", Container)
             NameLabel.BackgroundTransparency = 1
-            NameLabel.Size = UDim2.fromOffset(210, 18)
+            NameLabel.Size = UDim2.fromOffset(210, 22)
             NameLabel.Text = Player.DisplayName .. " (@" .. Player.Name .. ")"
-            NameLabel.TextColor3 = isFriendly(Player) and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 255, 255)
+            NameLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
             NameLabel.TextStrokeTransparency = 0
             NameLabel.TextScaled = true
             NameLabel.Font = Enum.Font.GothamBold
+        end
 
-            task.spawn(function()
-                while NameLabel and NameLabel.Parent do
-                    NameLabel.TextColor3 = isFriendly(Player) and Color3.fromRGB(50, 255, 50) or Color3.fromRGB(255, 255, 255)
-                    task.wait(1)
-                end
+        if _G.Settings.HealthESP then
+            local HealthBack = Instance.new("Frame", Container)
+            HealthBack.Size = UDim2.fromOffset(140, 10)
+            HealthBack.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+            HealthBack.BorderSizePixel = 0
+            Instance.new("UICorner", HealthBack).CornerRadius = UDim.new(1, 0)
+
+            local HealthBar = Instance.new("Frame", HealthBack)
+            HealthBar.Size = UDim2.fromScale(math.clamp(Humanoid.Health / math.max(Humanoid.MaxHealth, 1), 0, 1), 1)
+            HealthBar.BackgroundColor3 = Color3.fromRGB(50, 255, 100)
+            HealthBar.BorderSizePixel = 0
+            Instance.new("UICorner", HealthBar).CornerRadius = UDim.new(1, 0)
+
+            local HPText = Instance.new("TextLabel", Container)
+            HPText.BackgroundTransparency = 1
+            HPText.Size = UDim2.fromOffset(210, 18)
+            HPText.Text = math.floor(Humanoid.Health) .. " / " .. math.floor(Humanoid.MaxHealth) .. " HP"
+            HPText.TextColor3 = Color3.fromRGB(255, 255, 255)
+            HPText.TextStrokeTransparency = 0
+            HPText.TextScaled = true
+            HPText.Font = Enum.Font.Gotham
+
+            Humanoid.HealthChanged:Connect(function(Health)
+                if not HealthBar.Parent then return end
+                local MaxHealth = math.max(Humanoid.MaxHealth, 1)
+                HealthBar.Size = UDim2.fromScale(math.clamp(Health / MaxHealth, 0, 1), 1)
+                HPText.Text = math.floor(Health) .. " / " .. math.floor(MaxHealth) .. " HP"
             end)
         end
 
-        local InfoLabel = Instance.new("TextLabel", Container)
-        InfoLabel.BackgroundTransparency = 1
-        InfoLabel.Size = UDim2.fromOffset(210, 16)
-        InfoLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
-        InfoLabel.TextStrokeTransparency = 0
-        InfoLabel.TextScaled = true
-        InfoLabel.Font = Enum.Font.GothamBold
-
-        local function UpdateInfo()
-            if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return end
-            local myPos = LocalPlayer.Character.HumanoidRootPart.Position
-            local dist = math.floor((RootPart.Position - myPos).Magnitude)
-            local hpPercent = math.floor((Humanoid.Health / math.max(Humanoid.MaxHealth, 1)) * 100)
-            
-            if _G.Settings.HealthESP then
-                InfoLabel.Text = "[" .. dist .. "M] [" .. hpPercent .. "%]"
-            else
-                InfoLabel.Text = "[" .. dist .. "M]"
-            end
-        end
-
-        UpdateInfo()
-        
-        local conn
-        conn = RunService.RenderStepped:Connect(function()
-            if not Billboard or not Billboard.Parent then
-                if conn then conn:Disconnect() end
-                return
-            end
-            UpdateInfo()
-        end)
-
         if _G.Settings.ToolESP then
-            local ToolContainer = Instance.new("Frame", Container)
-            ToolContainer.Name = "ToolContainer"
-            ToolContainer.BackgroundTransparency = 1
-            ToolContainer.Size = UDim2.fromOffset(210, 90)
+            local ToolLabel = Instance.new("TextLabel", Container)
+            ToolLabel.BackgroundTransparency = 1
+            ToolLabel.Size = UDim2.fromOffset(210, 20)
+            ToolLabel.TextColor3 = Color3.fromRGB(255, 220, 80)
+            ToolLabel.TextStrokeTransparency = 0
+            ToolLabel.TextScaled = true
+            ToolLabel.Font = Enum.Font.GothamBold
 
-            local ToolLayout = Instance.new("UIListLayout", ToolContainer)
-            ToolLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
-            ToolLayout.VerticalAlignment = Enum.VerticalAlignment.Top
-            ToolLayout.Padding = UDim.new(0, 1)
-
-            local function UpdateTools()
-                for _, child in ipairs(ToolContainer:GetChildren()) do
-                    if child:IsA("TextLabel") then child:Destroy() end
-                end
-
-                local toolList = {}
-
-                for _, obj in ipairs(Character:GetChildren()) do
-                    if obj:IsA("Tool") then
-                        table.insert(toolList, obj)
-                    end
-                end
-
-                local backpack = Player:FindFirstChildOfClass("Backpack")
-                if backpack then
-                    for _, obj in ipairs(backpack:GetChildren()) do
-                        if obj:IsA("Tool") then
-                            table.insert(toolList, obj)
-                        end
-                    end
-                end
-
-                for _, toolObj in ipairs(toolList) do
-                    local realName = GetItemName(toolObj)
-                    local itemColor = GetItemColor(toolObj)
-
-                    local Label = Instance.new("TextLabel", ToolContainer)
-                    Label.BackgroundTransparency = 1
-                    Label.Size = UDim2.fromOffset(210, 15)
-                    Label.Text = realName
-                    Label.TextColor3 = itemColor
-                    Label.TextStrokeTransparency = 0
-                    Label.TextScaled = true
-                    Label.Font = Enum.Font.GothamBold
-                end
+            local function UpdateTool()
+                local t = Character:FindFirstChildOfClass("Tool")
+                ToolLabel.Text = "ถือ: " .. (t and t.Name or "-")
             end
-
-            UpdateTools()
-
-            Character.ChildAdded:Connect(function(o) if o:IsA("Tool") then task.wait(0.1); UpdateTools() end end)
-            Character.ChildRemoved:Connect(function(o) if o:IsA("Tool") then task.wait(0.1); UpdateTools() end end)
-            
-            local backpack = Player:FindFirstChildOfClass("Backpack")
-            if backpack then
-                backpack.ChildAdded:Connect(function(o) if o:IsA("Tool") then task.wait(0.1); UpdateTools() end end)
-                backpack.ChildRemoved:Connect(function(o) if o:IsA("Tool") then task.wait(0.1); UpdateTools() end end)
-            end
+            UpdateTool()
+            Character.ChildAdded:Connect(function(o) if o:IsA("Tool") then task.wait(); UpdateTool() end end)
+            Character.ChildRemoved:Connect(function(o) if o:IsA("Tool") then task.wait(); UpdateTool() end end)
         end
     end
 end
@@ -667,6 +635,7 @@ RunService.RenderStepped:Connect(function()
     FOVStroke.Color = _G.Settings.RainbowFOV and GetRainbow(1) or Color3.fromRGB(255, 255, 255)
 
     local Target = GetClosestTarget()
+    if Target then I = Players:GetPlayerFromCharacter(Target.Parent) else I = nil end
 
     if Target then
         if _G.Settings.AimbotEnabled then
@@ -756,7 +725,7 @@ _G.joinLowPlayerServer = function()
     end)
 end
 --========================================================
--- [PART 4/4] WINDUI INTERFACE
+-- [PART 5/5] WINDUI INTERFACE & SYSTEM BINDINGS
 --========================================================
 
 local WindUI = _G.WindUIInstance
@@ -786,6 +755,12 @@ CombatTab:Toggle({
     Callback = function(v) Settings.CameraLock = v; SaveConfig() end
 })
 
+CombatTab:Toggle({
+    Title = "ระบบยิงปืน (เส้นสีแดง Red Tracer)",
+    Value = Settings.RedTracerEnabled,
+    Callback = function(v) Settings.RedTracerEnabled = v; SaveConfig() end
+})
+
 CombatTab:Dropdown({
     Title = "ส่วนที่ต้องการล็อค",
     Values = {"หัว", "ลำตัว"},
@@ -806,45 +781,13 @@ CombatTab:Toggle({
     Callback = function(v) Settings.TeamCheck = v; SaveConfig() end
 })
 
-CombatTab:Toggle({
-    Title = "ไม่ล็อคเป้าเมื่อผู้เล่นอยู่ในเซฟ (Safezone Check)",
-    Value = Settings.SafezoneCheck,
-    Callback = function(v) Settings.SafezoneCheck = v; SaveConfig() end
-})
-
--- เมนูระบบพันธมิตร (เปิด/ปิด + พิมพ์ชื่อเพิ่ม)
-CombatTab:Toggle({
-    Title = "เปิดใช้งานระบบพันธมิตร (Whitelist)",
-    Value = Settings.FriendlyEnabled,
-    Callback = function(v) Settings.FriendlyEnabled = v; SaveConfig(); _G.RefreshPlayerESP() end
-})
-
-CombatTab:Input({
-    Title = "พิมพ์ชื่อผู้เล่นเพื่อเพิ่มเป็นพันธมิตร",
-    Placeholder = "ใส่ชื่อผู้เล่นที่นี่...",
-    Value = Settings.FriendlyNameInput,
-    Callback = function(v)
-        if v and v ~= "" then
-            _G.FriendlyPlayers[v] = true
-            SaveConfig()
-            _G.RefreshPlayerESP()
-        end
-    end
-})
-
--- TAB: GUN MODS & AUTO LOOT
-local GunTab = Window:Tab({ Title = "ปรับแต่งปืน & ฟาร์ม", Icon = "zap" })
+-- TAB: GUN MODS
+local GunTab = Window:Tab({ Title = "ปรับแต่งปืน", Icon = "zap" })
 
 GunTab:Toggle({
     Title = "ยิงอัตโนมัติเมื่อเล็งผู้เล่น (Auto Fire On Target)",
     Value = Settings.AutoShootOnTarget,
     Callback = function(v) Settings.AutoShootOnTarget = v; SaveConfig() end
-})
-
-GunTab:Toggle({
-    Title = "ระบบดูดของอัตโนมัติ (Item Aura)",
-    Value = Settings.ItemAuraEnabled,
-    Callback = function(v) Settings.ItemAuraEnabled = v; SaveConfig() end
 })
 
 -- TAB: FOV
@@ -886,21 +829,28 @@ ModTab:Slider({
 })
 
 ModTab:Toggle({
+    Title = "วิ่งเร็วพิเศษ (CFrame Speed)",
+    Value = Settings.CustomWalkSpeed,
+    Callback = function(v) Settings.CustomWalkSpeed = v; Q = v; SaveConfig() end
+})
+
+ModTab:Slider({
+    Title = "ตัวคูณความเร็ว CFrame",
+    Step = 0.5,
+    Value = { Min = 1, Max = 5, Default = Settings.SpeedMultiplier },
+    Callback = function(v) Settings.SpeedMultiplier = v; SaveConfig() end
+})
+
+ModTab:Toggle({
+    Title = "Infinite Stamina (สตามิน่าไม่จำกัด)",
+    Value = Settings.InfStamina,
+    Callback = function(v) ToggleInfiniteStamina(v); SaveConfig() end
+})
+
+ModTab:Toggle({
     Title = "Infinite Jump (กระโดดไม่จำกัด)",
     Value = Settings.InfiniteJumpEnabled,
     Callback = function(v) Settings.InfiniteJumpEnabled = v; SaveConfig() end
-})
-
-ModTab:Toggle({
-    Title = "ขยายระยะซูมกล้อง (Max Zoom)",
-    Value = Settings.ZoomEnabled,
-    Callback = function(v) Settings.ZoomEnabled = v; SaveConfig() end
-})
-
-ModTab:Toggle({
-    Title = "กันล้ม (Anti-Ragdoll / Auto Stand)",
-    Value = Settings.AntiFallEnabled,
-    Callback = function(v) Settings.AntiFallEnabled = v; SaveConfig() end
 })
 
 -- TAB: ESP & VISUALS
@@ -919,7 +869,7 @@ VisualTab:Toggle({
 })
 
 VisualTab:Toggle({
-    Title = "มองของที่ผู้เล่นถือ/สวมใส่",
+    Title = "มองของที่ผู้เล่นถือ",
     Value = Settings.ToolESP,
     Callback = function(v) Settings.ToolESP = v; _G.RefreshPlayerESP(); SaveConfig() end
 })
@@ -936,26 +886,8 @@ VisualTab:Toggle({
     Callback = function(v) Settings.RainbowESP = v; _G.RefreshPlayerESP(); SaveConfig() end
 })
 
-VisualTab:Toggle({
-    Title = "แสดง FPS (สีรุ้ง/ลากได้)",
-    Value = Settings.FPSCounterEnabled,
-    Callback = function(v) Settings.FPSCounterEnabled = v; SaveConfig() end
-})
-
 -- TAB: MISC & FUN PHYSICS
 local MiscTab = Window:Tab({ Title = "ระบบเสริม & เซิร์ฟเวอร์", Icon = "sliders" })
-
-MiscTab:Toggle({
-    Title = "ป้องกันการโดนเตะ (Anti-AFK)",
-    Value = Settings.AntiAFKEnabled,
-    Callback = function(v) Settings.AntiAFKEnabled = v; SaveConfig() end
-})
-
-MiscTab:Toggle({
-    Title = "ป้องกันการถูกวาป (Anti-Teleport)",
-    Value = Settings.AntiTeleportEnabled,
-    Callback = function(v) Settings.AntiTeleportEnabled = v; SaveConfig() end
-})
 
 MiscTab:Toggle({
     Title = "เปิดใช้งาน Boob Physics (Soft-Body)",
@@ -1005,4 +937,4 @@ MiscTab:Button({
 })
 
 _G.RefreshPlayerESP()
-print("BLOCKSPIN MASTER COMBAT & ESP HUB LOADED SUCCESSFULLY WITH ALL FEATURES!")
+print("BLOCKSPIN MASTER COMBAT & ESP HUB LOADED SUCCESSFULLY WITH AUTO-SAVE!")
