@@ -1,0 +1,296 @@
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+local Player = Players.LocalPlayer
+local Character = Player.Character or Player.CharacterAdded:Wait()
+local HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
+
+local c = ReplicatedStorage
+local g = Workspace
+local r = Player
+local u = HumanoidRootPart
+
+local ak = false
+local al = {}
+
+local aC
+
+pcall(function()
+    for _, v in ipairs(getgc(true)) do
+        if typeof(v) == "table"
+            and rawget(v, "event")
+            and rawget(v, "func") then
+
+            aC = v
+            break
+        end
+    end
+end)
+
+local function NetGet(...)
+    if not aC or not aC.func then
+        return
+    end
+
+    local aD = {...}
+
+    for aE, aF in ipairs(aD) do
+        if typeof(aF) == "Instance" then
+            if aF:IsA("Model") and #aF:GetChildren() == 0 then
+                local aG = g:FindFirstChild("DroppedItems")
+
+                if aG then
+                    local aH = aG:FindFirstChildWhichIsA("Model")
+
+                    if aH then
+                        aD[aE] = aH
+                    else
+                        return
+                    end
+                else
+                    return
+                end
+            end
+        end
+    end
+
+    aC.func = (aC.func or 0) + 1
+
+    local aE, aF = pcall(function()
+        local aE = c:WaitForChild("Remotes"):WaitForChild("Get")
+        return aE:InvokeServer(aC.func, unpack(aD))
+    end)
+
+    return aF
+end
+
+local function CheckAndPickup()
+    if not ak then
+        return
+    end
+
+    local aD = g:FindFirstChild("DroppedItems")
+
+    if not aD then
+        return
+    end
+
+    local aE = tick()
+    local aF = {}
+
+    for aG, aH in ipairs(aD:GetChildren()) do
+        if aH:IsA("Model") then
+            local aI = aH:FindFirstChildWhichIsA("BasePart")
+
+            if aI then
+                local aJ = (u.Position - aI.Position).Magnitude
+
+                if aJ <= 20 and (aE - (al[aH] or 0)) >= 0 then
+                    table.insert(aF, aH)
+                    al[aH] = aE
+                end
+            end
+        end
+    end
+
+    if #aF > 0 then
+        for aG, aH in ipairs(aF) do
+            spawn(function()
+                NetGet("pickup_dropped_item", aH)
+            end)
+        end
+    end
+end
+
+Player.CharacterAdded:Connect(function(char)
+    Character = char
+
+    local root = char:WaitForChild("HumanoidRootPart", 10)
+
+    if root then
+        u = root
+    end
+end)
+
+local ScreenGui = Instance.new("ScreenGui")
+
+ScreenGui.Name = "NextShopPickupUI"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+pcall(function()
+    ScreenGui.Parent = game:GetService("CoreGui")
+end)
+
+if not ScreenGui.Parent then
+    ScreenGui.Parent = Player:WaitForChild("PlayerGui")
+end
+
+local Main = Instance.new("Frame")
+
+Main.Name = "Main"
+Main.Size = UDim2.fromOffset(230, 115)
+Main.Position = UDim2.new(0, 15, 0, 15)
+Main.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+Main.BorderSizePixel = 0
+Main.Active = true
+Main.Parent = ScreenGui
+
+local Corner = Instance.new("UICorner")
+Corner.CornerRadius = UDim.new(0, 8)
+Corner.Parent = Main
+
+local Stroke = Instance.new("UIStroke")
+Stroke.Thickness = 1
+Stroke.Color = Color3.fromRGB(70, 70, 70)
+Stroke.Parent = Main
+
+local TitleBar = Instance.new("Frame")
+
+TitleBar.Size = UDim2.new(1, 0, 0, 35)
+TitleBar.BackgroundColor3 = Color3.fromRGB(35, 35, 35)
+TitleBar.BorderSizePixel = 0
+TitleBar.Active = true
+TitleBar.Parent = Main
+
+local TitleCorner = Instance.new("UICorner")
+TitleCorner.CornerRadius = UDim.new(0, 8)
+TitleCorner.Parent = TitleBar
+
+local Title = Instance.new("TextLabel")
+
+Title.Size = UDim2.new(1, -45, 1, 0)
+Title.Position = UDim2.fromOffset(10, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "next shop"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextSize = 17
+Title.Font = Enum.Font.GothamBold
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Parent = TitleBar
+
+local Close = Instance.new("TextButton")
+
+Close.Size = UDim2.fromOffset(28, 28)
+Close.Position = UDim2.new(1, -32, 0, 3)
+Close.BackgroundTransparency = 1
+Close.Text = "×"
+Close.TextColor3 = Color3.fromRGB(255, 80, 80)
+Close.TextSize = 22
+Close.Font = Enum.Font.GothamBold
+Close.Parent = TitleBar
+
+Close.MouseButton1Click:Connect(function()
+    ScreenGui:Destroy()
+end)
+
+local PickupLabel = Instance.new("TextLabel")
+
+PickupLabel.Size = UDim2.new(1, -30, 0, 30)
+PickupLabel.Position = UDim2.fromOffset(15, 47)
+PickupLabel.BackgroundTransparency = 1
+PickupLabel.Text = "ดูดของ"
+PickupLabel.TextColor3 = Color3.fromRGB(235, 235, 235)
+PickupLabel.TextSize = 15
+PickupLabel.Font = Enum.Font.Gotham
+PickupLabel.TextXAlignment = Enum.TextXAlignment.Left
+PickupLabel.Parent = Main
+
+local Toggle = Instance.new("TextButton")
+
+Toggle.Size = UDim2.fromOffset(75, 30)
+Toggle.Position = UDim2.new(1, -90, 0, 47)
+Toggle.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+Toggle.BorderSizePixel = 0
+Toggle.Text = "OFF"
+Toggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+Toggle.TextSize = 14
+Toggle.Font = Enum.Font.GothamBold
+Toggle.Parent = Main
+
+local ToggleCorner = Instance.new("UICorner")
+ToggleCorner.CornerRadius = UDim.new(0, 6)
+ToggleCorner.Parent = Toggle
+
+local function UpdateToggle()
+    if ak then
+        Toggle.Text = "ON"
+        Toggle.BackgroundColor3 = Color3.fromRGB(40, 170, 80)
+    else
+        Toggle.Text = "OFF"
+        Toggle.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    end
+end
+
+Toggle.MouseButton1Click:Connect(function()
+    ak = not ak
+    UpdateToggle()
+end)
+
+UpdateToggle()
+
+local Dragging = false
+local DragStart
+local StartPosition
+
+local function UpdateDrag(input)
+    local Delta = input.Position - DragStart
+
+    Main.Position = UDim2.new(
+        StartPosition.X.Scale,
+        StartPosition.X.Offset + Delta.X,
+        StartPosition.Y.Scale,
+        StartPosition.Y.Offset + Delta.Y
+    )
+end
+
+TitleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        Dragging = true
+        DragStart = input.Position
+        StartPosition = Main.Position
+
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                Dragging = false
+            end
+        end)
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if not Dragging then
+        return
+    end
+
+    if input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        UpdateDrag(input)
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    if not r.Character
+        or not r.Character:FindFirstChild("HumanoidRootPart") then
+
+        local character = r.Character
+
+        if not character then
+            return
+        end
+
+        local root = character:FindFirstChild("HumanoidRootPart")
+
+        if root then
+            u = root
+        end
+    end
+
+    pcall(CheckAndPickup)
+end)
