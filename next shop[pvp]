@@ -26,26 +26,64 @@ local y=g.CurrentCamera
 r:GetMouse()
 local z=d.TouchEnabled and not d.KeyboardEnabled
 
+local SilentAimEnabled = true
+local FOVRadius = 300
+
+local FOVGui = Instance.new("ScreenGui")
+FOVGui.Name = "FOVScreenGui"
+FOVGui.ResetOnSpawn = false
+FOVGui.Parent = r:WaitForChild("PlayerGui")
+
+local FOVCircle = Instance.new("Frame")
+FOVCircle.Name = "FOVCircle"
+FOVCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+FOVCircle.Position = UDim2.fromScale(0.5, 0.5)
+FOVCircle.Size = UDim2.fromOffset(FOVRadius * 2, FOVRadius * 2)
+FOVCircle.BackgroundTransparency = 1
+FOVCircle.Visible = SilentAimEnabled
+FOVCircle.Parent = FOVGui
+
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(1, 0)
+UICorner.Parent = FOVCircle
+
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Thickness = 2
+UIStroke.Color = Color3.fromRGB(255, 255, 255)
+UIStroke.Transparency = 0.2
+UIStroke.Parent = FOVCircle
+
+local Snapline = Drawing.new("Line")
+Snapline.Visible = false
+Snapline.Color = Color3.fromRGB(255, 0, 0)
+Snapline.Thickness = 1.5
+Snapline.Transparency = 1
+
+local currentHighlightTarget = nil
+local function updateHighlight(targetChar)
+    if currentHighlightTarget ~= targetChar then
+        if currentHighlightTarget and currentHighlightTarget:FindFirstChild("TargetHighlight") then
+            currentHighlightTarget.TargetHighlight:Destroy()
+        end
+        currentHighlightTarget = targetChar
+        if targetChar then
+            local highlight = Instance.new("Highlight")
+            highlight.Name = "TargetHighlight"
+            highlight.Adornee = targetChar
+            highlight.FillColor = Color3.fromRGB(255, 0, 0)
+            highlight.FillTransparency = 0.4
+            highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+            highlight.OutlineTransparency = 0
+            highlight.Parent = targetChar
+        end
+    end
+end
+
 local SelectedAimPart = "Head"
 local enabled = false
 local highlightEnabled = false
 local highlights = {}
 local AutoSprintToggle = {Set = function() end}
-
-local function createHighlight(char)
-    local hl = Instance.new("Highlight")
-    hl.Adornee = char
-    hl.FillColor = Color3.fromRGB(0,170,255)
-    hl.OutlineColor = Color3.fromRGB(0,170,255)
-    hl.Parent = workspace
-    return hl
-end
-
-local function updateHighlights()
-    for p, hl in pairs(highlights) do
-        if not p.Character then hl:Destroy() highlights[p] = nil end
-    end
-end
 
 local A
 pcall(function()
@@ -84,6 +122,7 @@ if A then
 else
     B={Tab=function(C) return {Section=function() end,Toggle=function() end,Slider=function() end,Button=function() end,Input=function() return {} end,Divider=function() end} end}
 end
+
 local C=B.ConfigManager
 local D=C:CreateConfig("NextShopPVPConfig")
 local E
@@ -134,33 +173,37 @@ local function getPing()
     if aI<0 or aI>2 then aI=0.2 end
     return aI
 end
+
 local function isPlayerExcluded(aD)
     for aE,aF in ipairs(P) do
         if aF~="" and string.find(string.lower(aD),string.lower(aF)) then return true end
     end
     return false
 end
-
 local function getClosestTarget()
-    local aD; local aE=H; local aF=Vector2.new(y.ViewportSize.X/2,y.ViewportSize.Y/2)
-    for aG,aH in ipairs(a:GetPlayers()) do
-        if aH~=r and aH.Character then
-            local aI=aH.Character:FindFirstChild("Head")
-            local aJ=aH.Character:FindFirstChild("Humanoid")
-            local aK=aH.Character:FindFirstChild("HumanoidRootPart")
-            if aI and aJ and aJ.Health>0 and aK then
-                local aL,aM=y:WorldToViewportPoint(aI.Position)
-                if aM then
-                    local aN=Vector2.new(aL.X,aL.Y)
-                    local aO=(aN-aF).Magnitude
-                    if aO<=H and not isPlayerExcluded(aH.Name) then
-                        if aO<aE then aE=aO aD=aH end
+    local closestHead = nil
+    local closestCharacter = nil
+    local shortestDistance = FOVRadius
+    local screenCenter = Vector2.new(y.ViewportSize.X / 2, y.ViewportSize.Y / 2)
+    for _, player in pairs(a:GetPlayers()) do
+        if player ~= r and player.Character then
+            local head = player.Character:FindFirstChild("Head") or player.Character:FindFirstChild("HumanoidRootPart")
+            local humanoid = player.Character:FindFirstChildOfClass("Humanoid")
+            if head and humanoid and humanoid.Health > 0 and not isPlayerExcluded(player.Name) then
+                local screenPos, onScreen = y:WorldToViewportPoint(head.Position)
+                if onScreen then
+                    local distance = (Vector2.new(screenPos.X, screenPos.Y) - screenCenter).Magnitude
+                    if distance <= shortestDistance then
+                        shortestDistance = distance
+                        closestHead = head
+                        closestCharacter = player.Character
                     end
                 end
             end
         end
     end
-    return aD
+    updateHighlight(closestCharacter)
+    return closestHead
 end
 
 local function predictPosition(aD,aE)
@@ -185,6 +228,7 @@ local function isBehindWall(aD,aE)
     local aK=aJ.Instance
     return aK and not table.find(aG,aK.Parent)
 end
+
 local function setupCharacter(aD)
     s=aD; t=aD:WaitForChild("Humanoid"); u=aD:WaitForChild("HumanoidRootPart")
     if _ then pcall(function() _:Disconnect() end) end
@@ -207,7 +251,6 @@ local function getHRP()
     if not aD then return end
     return aD:FindFirstChild("HumanoidRootPart")
 end
-
 local function teleportUnderground()
     local aD=getHRP()
     if not aD then return end
@@ -237,6 +280,7 @@ local function flickerAndMove()
         ag=false
     end)
 end
+
 local function NetGet(...)
     if not aC or not aC.func then return end
     local aD={...}
@@ -280,7 +324,6 @@ end
 
 local function SafeCall(aD,...) local aE,aF=pcall(aD,...) return aE,aF end
 local aD=table.unpack or unpack
-
 local function CallRemote(aE,...)
     if not aE then return end
     local aF={...}
@@ -306,6 +349,7 @@ local function CallRemote(aE,...)
         end, aD(aF))
     end
 end
+
 local function getPlayersInRange(aE)
     local aF={}; local aG=r.Character
     if not aG or not aG.PrimaryPart then return aF end
@@ -344,7 +388,6 @@ local function isMeleeTool(aE)
     if aG:FindFirstChild(aE.Name) and not aH:FindFirstChild(aE.Name) then return true end
     return false
 end
-
 local function AttackNearby()
     if not E then return end
     local aE=r.Character
@@ -384,6 +427,7 @@ local function StartAutoAttack()
         end
     end)
 end
+
 local function createNeonEffectAtPosition(aF,aG) if not s then return end end
 
 local function performTeleport()
@@ -401,7 +445,6 @@ local function toggleTeleport()
     V=not V
     if V then performTeleport() else X=nil end
 end
-
 local aF
 local function lockYPosition()
     if aF then pcall(function() aF:Disconnect() end) end
@@ -433,6 +476,7 @@ local function registerItems(aG)
         end
     end
 end
+
 local function getItemKey(aG)
     local aH=aG:FindFirstChild("Handle"); local aI=aG:GetAttribute("DisplayName") or aG.Name
     local aJ=aG:GetAttribute("ItemId") or aG:GetAttribute("Id") or aG.Name
@@ -450,7 +494,6 @@ local function getWeaponInfo(aG)
     if not aG or not aG:IsA("Tool") then return nil end
     local aH=getItemKey(aG); return au[aH]
 end
-
 local function createBillboardForPlayer(aG)
     if not aw or aG==r then return end
     local aH=aG.Character
@@ -488,6 +531,7 @@ local function createBillboardForPlayer(aG)
     end
     av[aG]=aJ
 end
+
 local function setFinishPrompt(aG)
     if aG and aG:IsA("ProximityPrompt") then aG.HoldDuration=ae; aG.MaxActivationDistance=20 end
 end
@@ -503,7 +547,6 @@ local function tryHoldPrompt(aG,aH)
     pcall(function() if aG.HoldEnd then aG:HoldEnd() end end)
     aG:SetAttribute("__AutoFinishBusy",nil)
 end
-
 local function findFinishPrompts()
     local aG={}
     for aH,aI in pairs(workspace:GetChildren()) do
@@ -625,7 +668,6 @@ local function createESP(aG)
     end)
     L[aG]={conn=aM,drawings=aL}
 end
-
 local function loadESP()
     for aG,aH in pairs(a:GetPlayers()) do
         if aH~=r and not L[aH] then createESP(aH) end
@@ -646,37 +688,6 @@ local function loadESP()
         end
     end)
 end
-
-local MobileFOVGui = nil
-if not z then
-    J=Drawing.new("Circle")
-    J.Color=Color3.fromRGB(255,255,255); J.Thickness=1.4; J.NumSides=64; J.Filled=false; J.Transparency=0.8; J.Radius=H; J.Visible=true
-else
-    MobileFOVGui=Instance.new("ScreenGui")
-    MobileFOVGui.Name="MobileFOV"
-    MobileFOVGui.ResetOnSpawn = false
-    MobileFOVGui.Parent=r:WaitForChild("PlayerGui")
-    J=Instance.new("Frame")
-    J.Size=UDim2.fromOffset(H*2,H*2); J.AnchorPoint=Vector2.new(0.5,0.5); J.Position=UDim2.fromScale(0.5,0.5); J.BackgroundTransparency=1
-    local aH=Instance.new("UICorner"); aH.CornerRadius=UDim.new(1,0); aH.Parent=J
-    local aI=Instance.new("UIStroke"); aI.Name = "RainbowStroke"; aI.Color=Color3.fromRGB(255,255,255); aI.Thickness=2; aI.Transparency=0.2; aI.Parent=J
-    J.Visible = true
-    J.Parent=MobileFOVGui
-end
-
-task.spawn(function()
-    while task.wait() do
-        local tickColor = tick() % 5 / 5
-        local rainbowColor = Color3.fromHSV(tickColor, 1, 1)
-        if not z and J then
-            J.Radius = H; J.Visible = true; J.Color = rainbowColor
-        elseif z and J then
-            J.Size = UDim2.fromOffset(H*2, H*2); J.Visible = true
-            local stroke = J:FindFirstChild("RainbowStroke")
-            if stroke then stroke.Color = rainbowColor end
-        end
-    end
-end)
 
 local aG=6; local aH=1.2; local aI=150; local aJ=0.75; local aK={}; local aL=Vector3.new()
 b.Heartbeat:Connect(function()
@@ -717,7 +728,6 @@ local function predictPosition2(aM,aN)
     if aR<0 then aR=0.1 end
     return aM.Position+(aQ*aR*aH)
 end
-
 local function isShotgun()
     if not s then return false end
     for aM,aN in ipairs(s:GetChildren()) do
@@ -729,130 +739,82 @@ local function isShotgun()
     return false
 end
 
-local aM
-if E and E.FireServer then
-    local aN=pcall(function()
-        aM=hookfunction(E.FireServer,function(aN,...)
-            if aN~=E then return aM(aN,...) end
-            local aO={...}
-            if F and aO[2]=="shoot_gun" and I then
-                local aP=I.Character and I.Character:FindFirstChild("Head")
-                local aQ=I.Character and I.Character:FindFirstChild("HumanoidRootPart")
-                local aR=I.Character and I.Character:FindFirstChild("Humanoid")
-                if aP and aQ and aR then
-                    local aS=predictPosition2(aP,aQ)
-                    local aT=r.Character and r.Character:FindFirstChild("Head")
-                    local aU=aT and aT.Position or nil
-                    if isShotgun() then
-                        aO[4]=CFrame.new(aU,aS)
-                        local aV={}
-                        for aW=1,6 do
-                            local aX=Vector3.new(math.random(-2,2)*0.03,math.random(-2,2)*0.03,math.random(-2,2)*0.03)
-                            table.insert(aV,{[1]={Instance=aP,Normal=Vector3.new(0,1,0),Position=aS+aX}})
-                        end
-                        aO[5]=aV
-                    else
-                        local aV=isBehindWall(aU,aS)
-                        if aV then aO[4]=CFrame.new(math.huge,math.huge,math.huge) else aO[4]=CFrame.new(aU,aS) end
-                        aO[5]={[1]={[1]={Instance=aP,Normal=Vector3.new(0,1,0),Position=aS}}}
-                    end
-                    local aV,aW=pcall(function()
-                        local aV=Instance.new("Part")
-                        aV.Anchored=true; aV.CanCollide=false
-                        aV.Size=Vector3.new(0.08,0.08,(aS-r.Character.Head.Position).Magnitude)
-                        aV.CFrame=CFrame.new(r.Character.Head.Position,aS)*CFrame.new(0,0,-aV.Size.Z/2)
-                        aV.Material=Enum.Material.Neon; aV.Transparency=0.35; aV.Color=Color3.fromRGB(255,0,0)
-                        aV.Parent=workspace; f:AddItem(aV,4)
-                        return aV
-                    end)
-                    if aR then
-                        local aX=aR.Health
-                        spawn(function()
-                            wait(0.1)
-                            if aR and aR.Health<aX then
-                                if aV and aW then aW.Color=Color3.fromRGB(0,255,0) end
-                                for aY,aZ in ipairs(I.Character:GetDescendants()) do
-                                    if aZ:IsA("BasePart") then
-                                        local a_=Instance.new("Part")
-                                        a_.Size=aZ.Size+Vector3.new(0.05,0.05,0.05); a_.CFrame=aZ.CFrame
-                                        a_.Anchored=true; a_.CanCollide=false; a_.Material=Enum.Material.Neon
-                                        a_.Color=Color3.fromRGB(255,0,0); a_.Transparency=0.5; a_.Parent=g
-                                        local a0=TweenInfo.new(1.5,Enum.EasingStyle.Linear)
-                                        e:Create(a_,a0,{Transparency=1}):Play(); f:AddItem(a_,2)
-                                    end
-                                end
-                                if aP then
-                                    local aY=Instance.new("Part")
-                                    aY.Size=Vector3.new(0.2,0.2,0.2); aY.Shape=Enum.PartType.Ball
-                                    aY.Material=Enum.Material.Neon; aY.Color=Color3.fromRGB(255,0,0)
-                                    aY.CFrame=CFrame.new(aP.Position); aY.Anchored=false; aY.CanCollide=false; aY.Parent=g
-                                    local aZ=Instance.new("BodyVelocity")
-                                    aZ.Velocity=Vector3.new(math.random(-5,5),math.random(5,10),math.random(-5,5))
-                                    aZ.P=5000; aZ.MaxForce=Vector3.new(4000,4000,4000); aZ.Parent=aY; f:AddItem(aY,1)
-                                end
-                            else
-                                if aV and aW then aW.Color=Color3.fromRGB(255,0,0) end
-                            end
-                        end)
-                    end
-                end
+local Remotes = c:WaitForChild("Remotes", 5)
+local SendRemote = Remotes and Remotes:WaitForChild("Send", 5)
+
+if SendRemote and SendRemote.FireServer then
+    local oldFireServer
+    oldFireServer = hookfunction(SendRemote.FireServer, function(self, ...)
+        if self ~= SendRemote then return oldFireServer(self, ...) end
+        local args = {...}
+
+        if SilentAimEnabled and args[2] == "shoot_gun" then
+            local targetHead = getClosestTarget()
+            if targetHead then
+                local myChar = r.Character
+                local myHead = myChar and myChar:FindFirstChild("Head")
+                local originPos = myHead and myHead.Position or y.CFrame.Position
+                local targetPos = targetHead.Position
+
+                args[4] = CFrame.new(originPos, targetPos)
+                args[5] = {
+                    [1] = {
+                        [1] = {
+                            ["Instance"] = targetHead,
+                            ["Normal"] = Vector3.new(0, 1, 0),
+                            ["Position"] = targetPos
+                        }
+                    }
+                }
+
+                task.spawn(function()
+                    local tracer = Instance.new("Part")
+                    tracer.Anchored = true
+                    tracer.CanCollide = false
+                    tracer.Material = Enum.Material.Neon
+                    tracer.Color = Color3.fromRGB(0, 255, 0)
+                    tracer.Transparency = 0.2
+                    tracer.Size = Vector3.new(0.1, 0.1, (targetPos - originPos).Magnitude)
+                    tracer.CFrame = CFrame.new(originPos, targetPos) * CFrame.new(0, 0, -tracer.Size.Z / 2)
+                    tracer.Parent = g
+                    f:AddItem(tracer, 1)
+                end)
             end
-            return aM(aN,unpack(aO))
-        end)
+        end
+
+        return oldFireServer(self, unpack(args))
     end)
 end
 
+local hue = 0
 b.RenderStepped:Connect(function()
     pcall(function()
-        if G then I=getClosestTarget() end
-        I=(F or G) and getClosestTarget() or nil
-        local aN=getClosestTarget()
-        if aN and aN.Character then
-            local aO=aN.Character
-            local aP=aO:FindFirstChild("Humanoid")
-            local aQ=aO:FindFirstChild("Head")
-            if aP and aP.Health>0 and aQ then
-                local aR=Vector2.new(y.ViewportSize.X/2,y.ViewportSize.Y/2)
-                local aS=aQ.Position
-                aL=aL:Lerp(aS,aJ)
-                local aT=aL
-                local aU,aV=y:WorldToViewportPoint(aT)
-                if aV then
-                    K.Visible=true; K.From=aR; K.To=Vector2.new(aU.X,aU.Y); K.Color=Color3.fromRGB(255,50,50); K.Thickness=1.3
-                    if not _G.TracerESP then
-                        _G.TracerESP={}
-                        for aW=1,4 do
-                            _G.TracerESP[aW]=Drawing.new("Line")
-                            _G.TracerESP[aW].Color=Color3.fromRGB(255,255,255)
-                            _G.TracerESP[aW].Thickness=1.2
-                            _G.TracerESP[aW].Visible=true
-                        end
-                    end
-                    local aW=y:WorldToViewportPoint(aQ.Position+Vector3.new(0,0.5,0))
-                    local aX=y:WorldToViewportPoint(aQ.Position-Vector3.new(0,0.5,0))
-                    local aY=Vector2.new(aU.X,aU.Y)
-                    local aZ=(aW-aX).Magnitude/2; local a_=aZ; local a0=8; local a1=25
-                    a_=math.clamp(a_,a0,a1); aZ=math.clamp(aZ,a0,a1)
-                    local a2=Vector2.new(aY.X,aY.Y-aZ); local a3=Vector2.new(aY.X,aY.Y+aZ)
-                    local a4=Vector2.new(aY.X-a_,aY.Y); local a5=Vector2.new(aY.X+a_,aY.Y)
-                    _G.TracerESP[1].From,_G.TracerESP[1].To=a2,a5
-                    _G.TracerESP[2].From,_G.TracerESP[2].To=a5,a3
-                    _G.TracerESP[3].From,_G.TracerESP[3].To=a3,a4
-                    _G.TracerESP[4].From,_G.TracerESP[4].To=a4,a2
-                    for a6=1,4 do _G.TracerESP[a6].Visible=true end
+        if SilentAimEnabled then
+            hue = (hue + 0.005) % 1
+            FOVCircle.Visible = true
+            FOVCircle.Size = UDim2.fromOffset(FOVRadius * 2, FOVRadius * 2)
+            UIStroke.Color = Color3.fromHSV(hue, 1, 1)
+
+            local targetHead = getClosestTarget()
+            if targetHead then
+                local screenPos, onScreen = y:WorldToViewportPoint(targetHead.Position)
+                if onScreen then
+                    Snapline.From = Vector2.new(y.ViewportSize.X / 2, y.ViewportSize.Y / 2)
+                    Snapline.To = Vector2.new(screenPos.X, screenPos.Y)
+                    Snapline.Visible = true
                 else
-                    K.Visible=false
-                    if _G.TracerESP then for aW=1,4 do _G.TracerESP[aW].Visible=false end end
+                    Snapline.Visible = false
                 end
             else
-                K.Visible=false
-                if _G.TracerESP then for aR=1,4 do _G.TracerESP[aR].Visible=false end end
+                Snapline.Visible = false
+                updateHighlight(nil)
             end
         else
-            K.Visible=false
-            if _G.TracerESP then for aO=1,4 do _G.TracerESP[aO].Visible=false end end
-            aL=Vector3.new()
+            FOVCircle.Visible = false
+            Snapline.Visible = false
+            updateHighlight(nil)
         end
+
         if S and T and u then
             local aO=u.Velocity; u.Velocity=Vector3.new(aO.X,U,aO.Z)
         end
@@ -929,7 +891,6 @@ d.InputBegan:Connect(function(aN,aO)
         if B.Toggle then B:Toggle() elseif B.SetVisible then B:SetVisible(not B.Visible) end
     end
 end)
-
 d.InputBegan:Connect(function(aN,aO)
     if aO then return end
     if aN.KeyCode==Enum.KeyCode.Z and W then toggleTeleport() end
@@ -946,7 +907,7 @@ end)
 StartAutoAttack()
 
 for aN,aO in ipairs({"gun","melee","throwable","consumable","farming","misc","rod","fish"}) do
-    registerItems(c:WaitForChild("Items")[aN])
+    registerItems(c:WaitForChild("Items")[aO])
 end
 
 a.PlayerAdded:Connect(function(aN)
@@ -988,19 +949,19 @@ a.PlayerRemoving:Connect(function(aN)
         L[aN]=nil
     end
 end)
+
 task.spawn(function()
     while task.wait(1) do if highlightEnabled then updateHighlights() end end
 end)
 
 loadESP()
-
 local aN_tab=B:Tab({Title="การต่อสู้",Icon="crosshair"})
 aN_tab:Section({Title="GUN"})
-local aO=aN_tab:Toggle({Title="เล็งเงียบ",Default=false,Callback=function(aO) F=aO; I=nil end})
+local aO=aN_tab:Toggle({Title="เล็งเงียบ",Default=true,Callback=function(aO) SilentAimEnabled=aO; I=nil end})
 D:Register("SilentAim",aO)
 local aP=aN_tab:Toggle({Title="ล็อกเส้นสีแดง",Default=false,Callback=function(aP) G=aP; I=nil end})
 D:Register("SilentAimAttach",aP)
-local aQ=aN_tab:Slider({Title="FOV",Step=1,Value={Min=20,Max=800,Default=H},Callback=function(aQ) H=tonumber(aQ) or 120 end})
+local aQ=aN_tab:Slider({Title="FOV",Step=1,Value={Min=20,Max=800,Default=FOVRadius},Callback=function(aQ) FOVRadius=tonumber(aQ) or 300 end})
 D:Register("FOVRadius",aQ)
 local aR=aN_tab:Input({Title="พันธมิตร",Desc="",Value="",InputIcon="shield-check",Type="Input",Placeholder="",Callback=function(aR)
     P={}
@@ -1024,7 +985,6 @@ local function isGunTool(aU)
     if not aU or not aU:IsA("Tool") then return false end
     return aT:FindFirstChild(aU.Name)~=nil or aU.Name:match("Gun") or aU:FindFirstChild("Handle")
 end
-
 local function forceSetAttribute(aU,aV,aW)
     if aU and aU.SetAttribute then pcall(function() aU:SetAttribute(aV,aW) end) end
 end
@@ -1091,13 +1051,6 @@ end
 local aU_list={}
 for aV,aW in ipairs(q:GetChildren()) do table.insert(aU_list,aW.Name) end
 
-local function isMeleeTool(aV)
-    if not aV:IsA("Tool") then return false end
-    if aV.Name=="Fists" then return true end
-    for aW,aX in ipairs(aU_list) do if aV.Name==aX then return true end end
-    return false
-end
-
 local function checkAndModifyFists()
     local aV=r.Character; local aW=r:FindFirstChild("Backpack")
     if not aV or not aW then return end
@@ -1106,7 +1059,6 @@ local function checkAndModifyFists()
     for aY,aZ in ipairs(aW:GetChildren()) do if isMeleeTool(aZ) then table.insert(aX,aZ) end end
     for aY,aZ in ipairs(aX) do modifyFists(aZ,ay) end
 end
-
 b.Heartbeat:Connect(function() if ay then checkAndModifyFists() end end)
 r.CharacterAdded:Connect(function() task.wait(1) if ay then checkAndModifyFists() end end)
 
@@ -1141,29 +1093,11 @@ local a0=aW_tab:Toggle({Title="ไฮไลท์",Default=false,Callback=functi
     for a1,a2 in pairs(game.Players:GetPlayers()) do updateHighlight(a2) end
 end})
 D:Register("HighlightESP",a0)
-function updateHighlight(a1)
-    if a1==game.Players.LocalPlayer then return end
-    if not a1.Character then return end
-    local a2=a1.Character:FindFirstChild("HumanoidRootPart")
-    if not a2 then return end
-    if aB[a1] then aB[a1]:Destroy(); aB[a1]=nil end
-    if highlightEnabled then
-        local a3=Instance.new("Highlight")
-        a3.Name="PlayerHighlight"; a3.Adornee=a1.Character
-        a3.FillColor=Color3.fromRGB(0,170,255); a3.OutlineColor=Color3.fromRGB(0,170,255)
-        a3.Parent=workspace; aB[a1]=a3
-    end
-end
+
 game.Players.PlayerAdded:Connect(function(a1)
     a1.CharacterAdded:Connect(function() task.wait(0.1) updateHighlight(a1) end)
 end)
 game.Players.PlayerRemoving:Connect(function(a1) if aB[a1] then aB[a1]:Destroy(); aB[a1]=nil end end)
-for a1,a2 in pairs(game.Players:GetPlayers()) do
-    if a2~=game.Players.LocalPlayer then
-        a2.CharacterAdded:Connect(function() task.wait(0.1) updateHighlight(a2) end)
-        updateHighlight(a2)
-    end
-end
 
 local a1_tab=B:Tab({Title="CHARACTER",Icon="user"})
 a1_tab:Section({Title="CHARACTER"})
@@ -1314,6 +1248,7 @@ local be=a1_tab:Slider({Title="ระยะ",Step=1,Value={Min=1,Max=300,Default
     end
 end})
 D:Register("SnapHeight",be)
+
 local bf_tab=B:Tab({Title="ซ้ำออโต้",Icon="person-standing"})
 bf_tab:Section({Title="PLAYER"})
 local bg=Instance.new("Folder",g); local bh=Instance.new("Part",bg); Instance.new("Attachment",bh)
@@ -1480,6 +1415,7 @@ local function cleanupItemDrawings()
         end
     end
 end
+
 b.RenderStepped:Connect(function()
     cleanupItemDrawings()
     if not x then return end
@@ -1557,7 +1493,7 @@ BuyTab:Toggle({Title = "Skip animation",Desc = "",Value = false,Callback = funct
                             if CrateController.skipping and CrateController.skipping.set then CrateController.skipping.set(true) end
                         end)
                     end
-                end
+     Cl         end
                 if CrateController.spinning and CrateController.skip_spin then
                     if not CrateController.spinning.get() then pcall(function() CrateController.skip_spin() end) end
                 end
@@ -1572,6 +1508,7 @@ local VehicleTab = B:Tab({Title = "Vehicle", Icon = "car"})
 VehicleTab:Section({Title = "Vehicle"})
 VehicleTab:Button({Title = "Pull Car Owner",Desc = "",Callback = function()
     local Players = game:GetService("Players"); local Client = Players.LocalPlayer
+    local Character = Client = Players.LocalPlayer
     local Character = Client.Character or Client.CharacterAdded:Wait()
     local RootPart = Character:WaitForChild("HumanoidRootPart")
     local Vehicles = workspace:WaitForChild("Vehicles")
