@@ -1,0 +1,356 @@
+--==================================================
+-- NEXT SHOP | PART 1/2
+-- Speed + High Jump + UI
+--==================================================
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+_G.Settings = _G.Settings or {}
+_G.Settings.CustomWalkSpeed = false
+_G.Settings.SpeedMultiplier = 5
+
+local speedEnabled = false
+local speedValue = 5
+local highJumpEnabled = false
+local speedConnection
+local jumpConnection
+
+local function create(className, properties, parent)
+    local object = Instance.new(className)
+    for property, value in pairs(properties) do
+        object[property] = value
+    end
+    object.Parent = parent
+    return object
+end
+
+pcall(function()
+    local old = playerGui:FindFirstChild("NEXTSHOP")
+    if old then
+        old:Destroy()
+    end
+end)
+
+local gui = create("ScreenGui", {
+    Name = "NEXTSHOP",
+    ResetOnSpawn = false
+}, playerGui)
+
+local main = create("Frame", {
+    Name = "Main",
+    Size = UDim2.new(0, 280, 0, 280),
+    Position = UDim2.new(0.5, -140, 0.5, -140),
+    BackgroundColor3 = Color3.fromRGB(20, 20, 35),
+    BorderSizePixel = 0,
+    Active = true
+}, gui)
+
+create("UICorner", {
+    CornerRadius = UDim.new(0, 12)
+}, main)
+
+create("UIStroke", {
+    Color = Color3.fromRGB(120, 70, 255),
+    Thickness = 2
+}, main)
+
+local title = create("TextLabel", {
+    Size = UDim2.new(1, -45, 0, 42),
+    Position = UDim2.new(0, 12, 0, 0),
+    BackgroundTransparency = 1,
+    Text = "NEXT SHOP",
+    TextColor3 = Color3.fromRGB(210, 190, 255),
+    TextSize = 22,
+    Font = Enum.Font.GothamBold,
+    TextXAlignment = Enum.TextXAlignment.Left
+}, main)
+
+local hideButton = create("TextButton", {
+    Size = UDim2.new(0, 32, 0, 32),
+    Position = UDim2.new(1, -38, 0, 5),
+    BackgroundColor3 = Color3.fromRGB(150, 50, 70),
+    Text = "X",
+    TextColor3 = Color3.new(1, 1, 1),
+    TextSize = 16,
+    Font = Enum.Font.GothamBold
+}, main)
+
+create("UICorner", {
+    CornerRadius = UDim.new(0, 8)
+}, hideButton)
+
+local function makeButton(text, position, size, color)
+    local button = create("TextButton", {
+        Size = size,
+        Position = position,
+        BackgroundColor3 = color,
+        Text = text,
+        TextColor3 = Color3.new(1, 1, 1),
+        TextSize = 15,
+        Font = Enum.Font.GothamBold,
+        AutoButtonColor = true
+    }, main)
+
+    create("UICorner", {
+        CornerRadius = UDim.new(0, 8)
+    }, button)
+
+    return button
+end
+
+local speedButton = makeButton(
+    "Speed: OFF",
+    UDim2.new(0, 15, 0, 55),
+    UDim2.new(1, -30, 0, 38),
+    Color3.fromRGB(70, 55, 130)
+)
+
+local speedDisplay = create("TextLabel", {
+    Size = UDim2.new(0, 100, 0, 35),
+    Position = UDim2.new(0.5, -50, 0, 100),
+    BackgroundTransparency = 1,
+    Text = "Speed: 5",
+    TextColor3 = Color3.new(1, 1, 1),
+    TextSize = 16,
+    Font = Enum.Font.GothamBold
+}, main)
+
+local minusButton = makeButton(
+    "-5",
+    UDim2.new(0, 30, 0, 100),
+    UDim2.new(0, 65, 0, 35),
+    Color3.fromRGB(160, 65, 65)
+)
+
+local plusButton = makeButton(
+    "+5",
+    UDim2.new(1, -95, 0, 100),
+    UDim2.new(0, 65, 0, 35),
+    Color3.fromRGB(55, 145, 90)
+)
+
+local jumpButton = makeButton(
+    "High Jump: OFF",
+    UDim2.new(0, 15, 0, 150),
+    UDim2.new(1, -30, 0, 38),
+    Color3.fromRGB(70, 55, 130)
+)
+
+local function updateSpeedDisplay()
+    speedDisplay.Text = "Speed: " .. tostring(speedValue)
+    _G.Settings.SpeedMultiplier = speedValue
+end
+
+speedButton.MouseButton1Click:Connect(function()
+    speedEnabled = not speedEnabled
+    _G.Settings.CustomWalkSpeed = speedEnabled
+
+    speedButton.Text = speedEnabled and "Speed: ON" or "Speed: OFF"
+    speedButton.BackgroundColor3 = speedEnabled
+        and Color3.fromRGB(45, 160, 90)
+        or Color3.fromRGB(70, 55, 130)
+end)
+
+minusButton.MouseButton1Click:Connect(function()
+    speedValue = math.max(5, speedValue - 5)
+    updateSpeedDisplay()
+end)
+
+plusButton.MouseButton1Click:Connect(function()
+    speedValue = math.min(100, speedValue + 5)
+    updateSpeedDisplay()
+end)
+
+jumpButton.MouseButton1Click:Connect(function()
+    highJumpEnabled = not highJumpEnabled
+
+    jumpButton.Text = highJumpEnabled
+        and "High Jump: ON"
+        or "High Jump: OFF"
+
+    jumpButton.BackgroundColor3 = highJumpEnabled
+        and Color3.fromRGB(45, 160, 90)
+        or Color3.fromRGB(70, 55, 130)
+end)
+
+-- ลากหน้าต่าง UI
+local dragging = false
+local dragStart
+local startPosition
+
+main.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+
+        if input.Position.Y - main.AbsolutePosition.Y <= 45 then
+            dragging = true
+            dragStart = input.Position
+            startPosition = main.Position
+        end
+    end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (
+        input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch
+    ) then
+        local delta = input.Position - dragStart
+
+        main.Position = UDim2.new(
+            startPosition.X.Scale,
+            startPosition.X.Offset + delta.X,
+            startPosition.Y.Scale,
+            startPosition.Y.Offset + delta.Y
+        )
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = false
+    end
+end)
+
+-- ซ่อน UI และสร้างปุ่มเปิดกลับ
+local reopenButton = create("TextButton", {
+    Name = "Reopen",
+    Size = UDim2.new(0, 100, 0, 35),
+    Position = UDim2.new(0, 15, 0.5, 0),
+    BackgroundColor3 = Color3.fromRGB(90, 60, 170),
+    Text = "OPEN NEXT",
+    TextColor3 = Color3.new(1, 1, 1),
+    TextSize = 14,
+    Font = Enum.Font.GothamBold,
+    Visible = false
+}, gui)
+
+create("UICorner", {
+    CornerRadius = UDim.new(0, 8)
+}, reopenButton)
+
+hideButton.MouseButton1Click:Connect(function()
+    main.Visible = false
+    reopenButton.Visible = true
+end)
+
+reopenButton.MouseButton1Click:Connect(function()
+    main.Visible = true
+    reopenButton.Visible = false
+end)
+
+--==================================================
+-- จบส่วนที่ 1
+-- ต่อด้วยส่วนที่ 2 ในข้อความถัดไป
+--==================================================
+--==================================================
+-- NEXT SHOP | PART 2/2
+-- Speed Engine + High Jump + Galaxy Intro
+--==================================================
+
+local function setupCharacter(character)
+    local humanoid = character:WaitForChild("Humanoid")
+    local root = character:WaitForChild("HumanoidRootPart")
+
+    if speedConnection then
+        speedConnection:Disconnect()
+        speedConnection = nil
+    end
+
+    if jumpConnection then
+        jumpConnection:Disconnect()
+        jumpConnection = nil
+    end
+
+    local originalJumpPower = humanoid.JumpPower
+
+    speedConnection = RunService.RenderStepped:Connect(function()
+        if speedEnabled
+            and humanoid.Health > 0
+            and humanoid.MoveDirection.Magnitude > 0 then
+
+            root.CFrame = root.CFrame
+                + humanoid.MoveDirection.Unit
+                * (_G.Settings.SpeedMultiplier * 0.05)
+        end
+    end)
+
+    jumpConnection = RunService.Heartbeat:Connect(function()
+        if humanoid.Health <= 0 then
+            return
+        end
+
+        if highJumpEnabled then
+            humanoid.UseJumpPower = true
+            humanoid.JumpPower = 100
+        else
+            humanoid.JumpPower = originalJumpPower
+        end
+    end)
+end
+
+if player.Character then
+    task.spawn(setupCharacter, player.Character)
+end
+
+player.CharacterAdded:Connect(function(character)
+    task.wait(0.5)
+    setupCharacter(character)
+end)
+
+-- Galaxy Intro
+local intro = Instance.new("Frame")
+intro.Name = "GalaxyIntro"
+intro.Size = UDim2.new(1, 0, 1, 0)
+intro.BackgroundColor3 = Color3.fromRGB(10, 5, 25)
+intro.BorderSizePixel = 0
+intro.ZIndex = 20
+intro.Parent = gui
+
+local introText = Instance.new("TextLabel")
+introText.Size = UDim2.new(1, 0, 0, 70)
+introText.Position = UDim2.new(0, 0, 0.5, -35)
+introText.BackgroundTransparency = 1
+introText.Text = "NEXT SHOP"
+introText.TextColor3 = Color3.fromRGB(190, 140, 255)
+introText.TextSize = 36
+introText.Font = Enum.Font.GothamBlack
+introText.ZIndex = 21
+introText.Parent = intro
+
+local introStroke = Instance.new("UIStroke")
+introStroke.Color = Color3.fromRGB(90, 40, 200)
+introStroke.Thickness = 2
+introStroke.Parent = introText
+
+task.wait(1)
+
+local tween = TweenService:Create(
+    intro,
+    TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+    {BackgroundTransparency = 1}
+)
+
+local textTween = TweenService:Create(
+    introText,
+    TweenInfo.new(0.8, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+    {TextTransparency = 1}
+)
+
+tween:Play()
+textTween:Play()
+tween.Completed:Wait()
+
+intro:Destroy()
+
+-- ไม่มีระบบรีเฟรชปุ่มกระโดดบนมือถือ
+--==================================================
+-- NEXT SHOP COMPLETE
+--==================================================
